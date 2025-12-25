@@ -1,0 +1,1577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auckland Airport Flight Map</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            padding: 20px 0 30px;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 300;
+            margin-bottom: 8px;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            color: #8892b0;
+            font-size: 1rem;
+        }
+
+        .map-container {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .map-controls {
+            position: absolute;
+            top: 30px;
+            right: 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 100;
+        }
+
+        .map-btn {
+            width: 36px;
+            height: 36px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(15, 23, 42, 0.9);
+            color: #fff;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            transition: all 0.2s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .map-btn:hover {
+            background: rgba(59, 130, 246, 0.5);
+            border-color: rgba(59, 130, 246, 0.6);
+        }
+
+        .map-btn:active {
+            transform: scale(0.95);
+        }
+
+        .map-btn-reset {
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
+        .zoom-info {
+            position: absolute;
+            bottom: 30px;
+            left: 30px;
+            background: rgba(15, 23, 42, 0.8);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            color: #94a3b8;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        #map {
+            cursor: grab;
+        }
+
+        #map.grabbing {
+            cursor: grabbing;
+        }
+
+        #map.zooming {
+            cursor: zoom-in;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #8892b0;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .loading-spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #4a5568;
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        #map {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .land {
+            fill: #2d3a4f;
+            stroke: #4a5568;
+            stroke-width: 0.5;
+            vector-effect: non-scaling-stroke;
+        }
+
+        .route {
+            fill: none;
+            stroke-width: 1.5;
+            opacity: 0.4;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            vector-effect: non-scaling-stroke;
+        }
+
+        .route.domestic {
+            stroke: #10b981;
+        }
+
+        .route.international {
+            stroke: #f59e0b;
+        }
+
+        .route:hover {
+            opacity: 1;
+            stroke-width: 3;
+        }
+
+        .airport {
+            cursor: pointer;
+            transition: fill 0.2s ease, stroke 0.2s ease, stroke-width 0.2s ease;
+            stroke: transparent;
+            stroke-width: 0;
+            vector-effect: non-scaling-stroke;
+        }
+
+        .airport:hover {
+            stroke-width: 3px;
+        }
+
+        .airport.origin {
+            fill: #ef4444;
+        }
+
+        .airport.origin:hover {
+            stroke: rgba(239, 68, 68, 0.5);
+            fill: #f87171;
+        }
+
+        .airport.destination {
+            fill: #3b82f6;
+        }
+
+        .airport.destination:hover {
+            stroke: rgba(59, 130, 246, 0.5);
+            fill: #60a5fa;
+        }
+
+        .tooltip {
+            position: fixed;
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            padding: 12px 16px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            z-index: 1000;
+            max-width: 300px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        .tooltip.visible {
+            opacity: 1;
+        }
+
+        .tooltip h3 {
+            font-size: 1rem;
+            margin-bottom: 6px;
+            color: #fff;
+        }
+
+        .tooltip .airlines {
+            font-size: 0.85rem;
+            color: #94a3b8;
+        }
+
+        .tooltip .route-type {
+            display: inline-block;
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .tooltip .route-type.domestic {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+        }
+
+        .tooltip .route-type.international {
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+        }
+
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.9rem;
+            color: #94a3b8;
+        }
+
+        .legend-line {
+            width: 30px;
+            height: 3px;
+            border-radius: 2px;
+        }
+
+        .legend-line.domestic {
+            background: #10b981;
+        }
+
+        .legend-line.international {
+            background: #f59e0b;
+        }
+
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .legend-dot.origin {
+            background: #ef4444;
+        }
+
+        .legend-dot.destination {
+            background: #3b82f6;
+        }
+
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin-top: 25px;
+            flex-wrap: wrap;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: #64748b;
+            margin-top: 4px;
+        }
+
+        footer {
+            text-align: center;
+            padding: 30px 0 20px;
+            color: #64748b;
+            font-size: 0.8rem;
+        }
+
+        footer a {
+            color: #3b82f6;
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Auckland Airport Flight Routes</h1>
+            <p class="subtitle">Direct destinations from AKL • Data from Wikipedia</p>
+        </header>
+
+        <div class="map-container">
+            <div class="loading" id="loading">
+                <div class="loading-spinner"></div>
+                <span>Loading map data...</span>
+            </div>
+            <div class="map-controls">
+                <button class="map-btn" id="zoom-in" title="Zoom in">+</button>
+                <button class="map-btn" id="zoom-out" title="Zoom out">−</button>
+                <button class="map-btn map-btn-reset" id="zoom-reset" title="Reset view">⟲</button>
+            </div>
+            <div class="zoom-info" id="zoom-info">100%</div>
+            <svg id="map" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid meet">
+                <!-- World map paths will be added here -->
+                <g id="countries"></g>
+                <g id="routes"></g>
+                <g id="airports"></g>
+            </svg>
+        </div>
+
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-dot origin"></div>
+                <span>Auckland (AKL)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot destination"></div>
+                <span>Destinations</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-line domestic"></div>
+                <span>Domestic Routes</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-line international"></div>
+                <span>International Routes</span>
+            </div>
+        </div>
+
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-value" id="domestic-count">0</div>
+                <div class="stat-label">Domestic Destinations</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="international-count">0</div>
+                <div class="stat-label">International Destinations</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="airline-count">0</div>
+                <div class="stat-label">Airlines</div>
+            </div>
+        </div>
+
+        <footer>
+            <p>Data sourced from <a href="https://en.wikipedia.org/wiki/Auckland_Airport" target="_blank">Wikipedia - Auckland Airport</a></p>
+        </footer>
+    </div>
+
+    <div class="tooltip" id="tooltip"></div>
+
+    <script>
+        // Auckland Airport coordinates
+        const AUCKLAND = { lat: -36.8509, lon: 174.7645, name: "Auckland", code: "AKL" };
+
+        // Flight data from Auckland Airport
+        const flights = [
+          {
+            city: "Adelaide",
+            code: "ADL",
+            lat: -34.9462,
+            lon: 138.5332,
+            country: "Australia",
+            airlines: ["Air New Zealand", "Qantas"],
+            domestic: false
+          },
+          {
+            city: "Apia",
+            code: "APW",
+            lat: -13.8314,
+            lon: -172.0005,
+            country: "Samoa",
+            airlines: ["Air New Zealand", "Qantas"],
+            domestic: false
+          },
+          {
+            city: "Beijing",
+            code: "PEK",
+            lat: 40.0799,
+            lon: 116.6031,
+            country: "China",
+            airlines: ["Air China"],
+            domestic: false
+          },
+          {
+            city: "Blenheim",
+            code: "BHE",
+            lat: -41.5183,
+            lon: 173.8707,
+            country: "New Zealand",
+            airlines: ["Air Chathams", "Air New Zealand"],
+            domestic: true
+          },
+          {
+            city: "Brisbane",
+            code: "BNE",
+            lat: -27.3842,
+            lon: 153.1175,
+            country: "Australia",
+            airlines: ["Air New Zealand", "China Airlines", "Jetstar", "Qantas", "Solomon Airlines"],
+            domestic: false
+          },
+          {
+            city: "Buenos Aires",
+            code: "EZE",
+            lat: -34.8150,
+            lon: -58.5348,
+            country: "Argentina",
+            airlines: ["China Eastern Airlines"],
+            domestic: false
+          },
+          {
+            city: "Cairns",
+            code: "CNS",
+            lat: -16.8858,
+            lon: 145.7552,
+            country: "Australia",
+            airlines: ["Air New Zealand"],
+            domestic: false
+          },
+          {
+            city: "Chatham Islands",
+            code: "CHT",
+            lat: -43.8119,
+            lon: -176.4649,
+            country: "New Zealand",
+            airlines: ["Air Chathams"],
+            domestic: true
+          },
+          {
+            city: "Chengdu",
+            code: "TFU",
+            lat: 30.3347,
+            lon: 104.4502,
+            country: "China",
+            airlines: ["Sichuan Airlines"],
+            domestic: false
+          },
+          {
+            city: "Christchurch",
+            code: "CHC",
+            lat: -43.4894,
+            lon: 172.5322,
+            country: "New Zealand",
+            airlines: ["Air New Zealand", "Jetstar"],
+            domestic: true
+          },
+          {
+            city: "Chongqing",
+            code: "CKG",
+            lat: 29.7192,
+            lon: 106.6417,
+            country: "China",
+            airlines: ["Hainan Airlines"],
+            domestic: false
+          },
+          {
+            city: "Claris (Great Barrier)",
+            code: "GBZ",
+            lat: -36.2394,
+            lon: 175.4719,
+            country: "New Zealand",
+            airlines: ["Barrier Air"],
+            domestic: true
+          },
+          {
+            city: "Dallas/Fort Worth",
+            code: "DFW",
+            lat: 32.8998,
+            lon: -97.0403,
+            country: "United States",
+            airlines: ["American Airlines"],
+            domestic: false
+          },
+          {
+            city: "Denpasar",
+            code: "DPS",
+            lat: -8.7467,
+            lon: 115.1668,
+            country: "Indonesia",
+            airlines: ["Air New Zealand"],
+            domestic: false
+          },
+          {
+            city: "Doha",
+            code: "DOH",
+            lat: 25.2609,
+            lon: 51.5651,
+            country: "Qatar",
+            airlines: ["Qatar Airways"],
+            domestic: false
+          },
+          {
+            city: "Dubai",
+            code: "DXB",
+            lat: 25.2532,
+            lon: 55.3657,
+            country: "United Arab Emirates",
+            airlines: ["Emirates"],
+            domestic: false
+          },
+          {
+            city: "Dunedin",
+            code: "DUD",
+            lat: -45.9281,
+            lon: 170.1983,
+            country: "New Zealand",
+            airlines: ["Air New Zealand", "Jetstar"],
+            domestic: true
+          },
+          {
+            city: "Gisborne",
+            code: "GIS",
+            lat: -38.6633,
+            lon: 177.9781,
+            country: "New Zealand",
+            airlines: ["Air New Zealand"],
+            domestic: true
+          },
+          {
+            city: "Gold Coast",
+            code: "OOL",
+            lat: -28.1645,
+            lon: 153.5053,
+            country: "Australia",
+            airlines: ["Air New Zealand", "Jetstar", "Qantas"],
+            domestic: false
+          },
+          {
+            city: "Guangzhou",
+            code: "CAN",
+            lat: 23.3959,
+            lon: 113.2970,
+            country: "China",
+            airlines: ["China Southern Airlines"],
+            domestic: false
+          },
+          {
+            city: "Haikou",
+            code: "HAK",
+            lat: 19.9348,
+            lon: 110.4589,
+            country: "China",
+            airlines: ["Hainan Airlines"],
+            domestic: false
+          },
+          {
+            city: "Hangzhou",
+            code: "HGH",
+            lat: 30.2295,
+            lon: 120.4344,
+            country: "China",
+            airlines: ["China Eastern Airlines"],
+            domestic: false
+          },
+          {
+            city: "Hobart",
+            code: "HBA",
+            lat: -42.8361,
+            lon: 147.5103,
+            country: "Australia",
+            airlines: ["Air New Zealand"],
+            domestic: false
+          },
+          {
+            city: "Hong Kong",
+            code: "HKG",
+            lat: 22.3080,
+            lon: 113.9185,
+            country: "Hong Kong",
+            airlines: ["Air New Zealand", "Cathay Pacific"],
+            domestic: false
+          },
+          {
+            city: "Honiara",
+            code: "HIR",
+            lat: -9.4286,
+            lon: 160.0547,
+            country: "Solomon Islands",
+            airlines: ["Solomon Airlines"],
+            domestic: false
+          },
+          {
+            city: "Honolulu",
+            code: "HNL",
+            lat: 21.3187,
+            lon: -157.9213,
+            country: "United States",
+            airlines: ["Air New Zealand", "Hawaiian Airlines"],
+            domestic: false
+          },
+          {
+            city: "Houston",
+            code: "IAH",
+            lat: 29.9902,
+            lon: -95.3368,
+            country: "United States",
+            airlines: ["Air New Zealand"],
+            domestic: false
+          },
+          {
+            city: "Invercargill",
+            code: "IVC",
+            lat: -46.4163,
+            lon: 168.3204,
+            country: "New Zealand",
+            airlines: ["Air New Zealand"],
+            domestic: true
+          },
+          {
+            city: "Kaitaia",
+            code: "KAT",
+            lat: -35.0700,
+            lon: 173.2872,
+            country: "New Zealand",
+            airlines: ["Barrier Air"],
+            domestic: true
+          },
+          {
+            city: "Kapiti Coast",
+            code: "PPQ",
+            lat: -40.9047,
+            lon: 174.9847,
+            country: "New Zealand",
+            airlines: ["Air Chathams"],
+            domestic: true
+          },
+          {
+            city: "Kerikeri",
+            code: "KKE",
+            lat: -35.2636,
+            lon: 173.9119,
+            country: "New Zealand",
+            airlines: ["Air New Zealand", "Barrier Air"],
+            domestic: true
+          },
+          {
+            city: "Kuala Lumpur",
+            code: "KUL",
+            lat: 2.7456,
+            lon: 101.7072,
+            country: "Malaysia",
+            airlines: ["Malaysia Airlines"],
+            domestic: false
+          },
+          {
+            city: "Los Angeles",
+            code: "LAX",
+            lat: 33.9416,
+            lon: -118.4085,
+            country: "United States",
+            airlines: ["Air New Zealand", "Air Tahiti Nui", "American Airlines", "Delta Air Lines"],
+            domestic: false
+          },
+          {
+            city: "Melbourne",
+            code: "MEL",
+            lat: -37.6637,
+            lon: 144.8348,
+            country: "Australia",
+            airlines: ["Air New Zealand", "Jetstar", "Qantas"],
+            domestic: false
+          },
+          {
+            city: "Nadi",
+            code: "NAN",
+            lat: -17.7554,
+            lon: 177.4430,
+            country: "Fiji",
+            airlines: ["Air New Zealand", "Fiji Airways"],
+            domestic: false
+          },
+          {
+            city: "Napier",
+            code: "NPE",
+            lat: -39.4658,
+            lon: 176.8703,
+            country: "New Zealand",
+            airlines: ["Air New Zealand"],
+            domestic: true
+          },
+          {
+            city: "Nelson",
+            code: "NSN",
+            lat: -41.2982,
+            lon: 173.2241,
+            country: "New Zealand",
+            airlines: ["Air New Zealand"],
+            domestic: true
+          },
+          {
+            city: "New Plymouth",
+            code: "NPL",
+            lat: -39.0086,
+            lon: 174.1794,
+            country: "New Zealand",
+            airlines: ["Air New Zealand"],
+            domestic: true
+          },
+          {
+            city: "New York",
+            code: "JFK",
+            lat: 40.6413,
+            lon: -73.7781,
+            country: "United States",
+            airlines: ["Air New Zealand", "Qantas"],
+            domestic: false
+          },
+          {
+            city: "Niue",
+            code: "IUE",
+            lat: -19.0801,
+            lon: -169.9261,
+            country: "Niue",
+            airlines: ["Air New Zealand"],
+            domestic: false
+          },
+          {
+            city: "Nouméa",
+            code: "NOU",
+            lat: -22.0142,
+            lon: 166.2128,
+            country: "New Caledonia",
+            airlines: ["Air New Zealand", "Aircalin"],
+            domestic: false
+          },
+          {
+            city: "Nuku'alofa",
+            code: "TBU",
+            lat: -21.2408,
+            lon: -175.1408,
+            country: "Tonga",
+            airlines: ["Air New Zealand"],
+            domestic: false
+          },
+          {
+            city: "Palmerston North",
+            code: "PMR",
+            lat: -40.3208,
+            lon: 175.6171,
+            country: "New Zealand",
+            airlines: ["Air New Zealand"],
+            domestic: true
+          },
+          {
+            city: "Papeete",
+            code: "PPT",
+            lat: -17.5536,
+            lon: -149.6057,
+            country: "French Polynesia",
+            airlines: ["Air New Zealand", "Air Tahiti Nui"],
+            domestic: false
+          },
+          {
+            city: "Perth",
+            code: "PER",
+            lat: -31.9385,
+            lon: 115.9672,
+            country: "Australia",
+            airlines: ["Air New Zealand", "Qantas"],
+            domestic: false
+          },
+          {
+            city: "Port Vila",
+            code: "VLI",
+            lat: -17.6993,
+            lon: 168.3198,
+            country: "Vanuatu",
+            airlines: ["Solomon Airlines"],
+            domestic: false
+          },
+          {
+            city: "Queenstown",
+            code: "ZQN",
+            lat: -45.0210,
+            lon: 168.7396,
+            country: "New Zealand",
+            airlines: ["Air New Zealand", "Jetstar"],
+            domestic: true
+          },
+          {
+            city: "Rarotonga",
+            code: "RAR",
+            lat: -21.2014,
+            lon: -159.8061,
+            country: "Cook Islands",
+            airlines: ["Air New Zealand", "Jetstar"],
+            domestic: false
+          },
+          {
+            city: "Rotorua",
+            code: "ROT",
+            lat: -38.1092,
+            lon: 176.3172,
+            country: "New Zealand",
+            airlines: ["Air New Zealand"],
+            domestic: true
+          },
+          {
+            city: "San Francisco",
+            code: "SFO",
+            lat: 37.6213,
+            lon: -122.3790,
+            country: "United States",
+            airlines: ["Air New Zealand", "United Airlines"],
+            domestic: false
+          },
+          {
+            city: "Santiago de Chile",
+            code: "SCL",
+            lat: -33.3930,
+            lon: -70.7858,
+            country: "Chile",
+            airlines: ["LATAM Chile"],
+            domestic: false
+          },
+          {
+            city: "Seoul",
+            code: "ICN",
+            lat: 37.4602,
+            lon: 126.4407,
+            country: "South Korea",
+            airlines: ["Korean Air"],
+            domestic: false
+          },
+          {
+            city: "Shanghai",
+            code: "PVG",
+            lat: 31.1443,
+            lon: 121.8083,
+            country: "China",
+            airlines: ["Air New Zealand", "China Eastern Airlines"],
+            domestic: false
+          },
+          {
+            city: "Shenzhen",
+            code: "SZX",
+            lat: 22.6393,
+            lon: 113.8107,
+            country: "China",
+            airlines: ["Hainan Airlines"],
+            domestic: false
+          },
+          {
+            city: "Singapore",
+            code: "SIN",
+            lat: 1.3644,
+            lon: 103.9915,
+            country: "Singapore",
+            airlines: ["Air New Zealand", "Singapore Airlines"],
+            domestic: false
+          },
+          {
+            city: "Sunshine Coast",
+            code: "MCY",
+            lat: -26.6033,
+            lon: 153.0908,
+            country: "Australia",
+            airlines: ["Air New Zealand", "Jetstar"],
+            domestic: false
+          },
+          {
+            city: "Sydney",
+            code: "SYD",
+            lat: -33.9399,
+            lon: 151.1753,
+            country: "Australia",
+            airlines: ["Air New Zealand", "China Eastern Airlines", "Jetstar", "Qantas"],
+            domestic: false
+          },
+          {
+            city: "Taipei",
+            code: "TPE",
+            lat: 25.0797,
+            lon: 121.2342,
+            country: "Taiwan",
+            airlines: ["Air New Zealand", "China Airlines"],
+            domestic: false
+          },
+          {
+            city: "Taupō",
+            code: "TUO",
+            lat: -38.7408,
+            lon: 176.0847,
+            country: "New Zealand",
+            airlines: ["Air New Zealand"],
+            domestic: true
+          },
+          {
+            city: "Tauranga",
+            code: "TRG",
+            lat: -37.6719,
+            lon: 176.1961,
+            country: "New Zealand",
+            airlines: ["Air New Zealand"],
+            domestic: true
+          },
+          {
+            city: "Tokyo",
+            code: "NRT",
+            lat: 35.7720,
+            lon: 140.3929,
+            country: "Japan",
+            airlines: ["Air New Zealand"],
+            domestic: false
+          },
+          {
+            city: "Vancouver",
+            code: "YVR",
+            lat: 49.1947,
+            lon: -123.1760,
+            country: "Canada",
+            airlines: ["Air Canada", "Air New Zealand"],
+            domestic: false
+          },
+          {
+            city: "Wellington",
+            code: "WLG",
+            lat: -41.3272,
+            lon: 174.8052,
+            country: "New Zealand",
+            airlines: ["Air New Zealand", "Jetstar"],
+            domestic: true
+          },
+          {
+            city: "Whakatāne",
+            code: "WHK",
+            lat: -37.9208,
+            lon: 176.9142,
+            country: "New Zealand",
+            airlines: ["Air Chathams"],
+            domestic: true
+          },
+          {
+            city: "Whanganui",
+            code: "WAG",
+            lat: -39.9622,
+            lon: 175.0250,
+            country: "New Zealand",
+            airlines: ["Air Chathams"],
+            domestic: true
+          },
+          {
+            city: "Whangārei",
+            code: "WRE",
+            lat: -35.7684,
+            lon: 174.3644,
+            country: "New Zealand",
+            airlines: ["Air New Zealand"],
+            domestic: true
+          },
+          {
+            city: "Whitianga",
+            code: "WTZ",
+            lat: -36.8328,
+            lon: 175.6806,
+            country: "New Zealand",
+            airlines: ["Barrier Air"],
+            domestic: true
+          }
+        ];
+        // GeoJSON URL for Natural Earth 110m countries (low resolution, good for web)
+        const GEOJSON_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
+
+        // Central meridian - centred on Pacific, adjusted to keep Europe/Africa visible
+        // 160° keeps NZ on the right side while ensuring Europe/Africa aren't cut off at the left edge
+        const CENTRAL_MERIDIAN = 160;
+
+        // Convert lat/lon to SVG coordinates (Mercator-like projection centred on NZ)
+        function latLonToXY(lat, lon) {
+            // Shift longitude relative to central meridian and wrap
+            let adjustedLon = lon - CENTRAL_MERIDIAN;
+            // Normalize to -180 to 180 range
+            while (adjustedLon > 180) adjustedLon -= 360;
+            while (adjustedLon < -180) adjustedLon += 360;
+
+            const x = (adjustedLon + 180) * (1000 / 360);
+            const latRad = lat * Math.PI / 180;
+            const mercN = Math.log(Math.tan((Math.PI / 4) + (latRad / 2)));
+            const y = (500 / 2) - (1000 * mercN / (2 * Math.PI)) * 0.8;
+            return { x, y: Math.max(20, Math.min(480, y)) };
+        }
+
+        // Convert a ring of coordinates [lon, lat] to SVG path
+        function ringToPath(ring) {
+            if (!ring || ring.length < 3) return '';
+
+            const points = ring.map(([lon, lat]) => latLonToXY(lat, lon));
+
+            // Check if polygon crosses the map edge
+            let crossesEdge = false;
+            for (let i = 1; i < points.length; i++) {
+                if (Math.abs(points[i].x - points[i-1].x) > 500) {
+                    crossesEdge = true;
+                    break;
+                }
+            }
+
+            if (crossesEdge) {
+                // Split polygon at the edge - simplified approach
+                // Just skip small polygons that cross, render larger ones partially
+                return '';
+            }
+
+            let path = `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
+            for (let i = 1; i < points.length; i++) {
+                path += ` L ${points[i].x.toFixed(1)} ${points[i].y.toFixed(1)}`;
+            }
+            path += ' Z';
+            return path;
+        }
+
+        // Decode TopoJSON arc
+        function decodeArc(topology, arcIndex) {
+            const arc = topology.arcs[arcIndex < 0 ? ~arcIndex : arcIndex];
+            const points = [];
+            let x = 0, y = 0;
+
+            for (const [dx, dy] of arc) {
+                x += dx;
+                y += dy;
+                points.push([
+                    x * topology.transform.scale[0] + topology.transform.translate[0],
+                    y * topology.transform.scale[1] + topology.transform.translate[1]
+                ]);
+            }
+
+            if (arcIndex < 0) {
+                points.reverse();
+            }
+
+            return points;
+        }
+
+        // Convert TopoJSON arcs to coordinates
+        function arcsToCoordinates(topology, arcs) {
+            const coordinates = [];
+            for (const arcIndex of arcs) {
+                const decoded = decodeArc(topology, arcIndex);
+                // Avoid duplicate points at arc boundaries
+                if (coordinates.length > 0) {
+                    decoded.shift();
+                }
+                coordinates.push(...decoded);
+            }
+            return coordinates;
+        }
+
+        // Convert TopoJSON geometry to SVG paths
+        function geometryToSVGPaths(topology, geometry) {
+            const paths = [];
+
+            if (geometry.type === 'Polygon') {
+                for (const ring of geometry.arcs) {
+                    const coords = arcsToCoordinates(topology, ring);
+                    const path = ringToPath(coords);
+                    if (path) paths.push(path);
+                }
+            } else if (geometry.type === 'MultiPolygon') {
+                for (const polygon of geometry.arcs) {
+                    for (const ring of polygon) {
+                        const coords = arcsToCoordinates(topology, ring);
+                        const path = ringToPath(coords);
+                        if (path) paths.push(path);
+                    }
+                }
+            }
+
+            return paths;
+        }
+
+        // Load and parse TopoJSON
+        async function loadWorldMap() {
+            try {
+                const response = await fetch(GEOJSON_URL);
+                if (!response.ok) throw new Error('Network response was not ok');
+                const topology = await response.json();
+
+                // Verify topology has required transform property
+                if (!topology.transform) {
+                    throw new Error('Invalid TopoJSON format');
+                }
+
+                const paths = [];
+                const countries = topology.objects.countries;
+
+                if (countries.type === 'GeometryCollection') {
+                    for (const geometry of countries.geometries) {
+                        const countryPaths = geometryToSVGPaths(topology, geometry);
+                        paths.push(...countryPaths);
+                    }
+                }
+
+                return { success: true, paths };
+            } catch (error) {
+                console.error('Failed to load world map:', error);
+                return { success: false, paths: [] };
+            }
+        }
+
+        // Create curved path between two points
+        function createCurvedPath(from, to) {
+            const start = latLonToXY(from.lat, from.lon);
+            const end = latLonToXY(to.lat, to.lon);
+
+            // Handle paths that cross the map edge
+            let endX = end.x;
+            const directDist = Math.abs(end.x - start.x);
+            const wrapDist = 1000 - directDist;
+
+            if (wrapDist < directDist) {
+                // Path crosses edge, wrap around
+                if (end.x < start.x) {
+                    endX = end.x + 1000;
+                } else {
+                    endX = end.x - 1000;
+                }
+            }
+
+            const midX = (start.x + endX) / 2;
+            const midY = (start.y + end.y) / 2;
+            const dist = Math.sqrt(Math.pow(endX - start.x, 2) + Math.pow(end.y - start.y, 2));
+            const curvature = Math.min(dist * 0.15, 60);
+
+            // Curve upward (away from origin) for visual appeal
+            const controlY = midY - curvature;
+
+            return `M ${start.x} ${start.y} Q ${midX} ${controlY} ${endX} ${end.y}`;
+        }
+
+        // Initialize map
+        async function initMap() {
+            const countriesGroup = document.getElementById('countries');
+            const routesGroup = document.getElementById('routes');
+            const airportsGroup = document.getElementById('airports');
+            const tooltip = document.getElementById('tooltip');
+            const loading = document.getElementById('loading');
+
+            // Load and draw world map from GeoJSON
+            const result = await loadWorldMap();
+
+            if (result.success && result.paths.length > 0) {
+                result.paths.forEach(pathData => {
+                    const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                    pathEl.setAttribute('d', pathData);
+                    pathEl.setAttribute('class', 'land');
+                    countriesGroup.appendChild(pathEl);
+                });
+                // Hide loading indicator
+                if (loading) loading.style.display = 'none';
+            } else {
+                // Show error state
+                if (loading) {
+                    loading.innerHTML = '<span style="color: #ef4444;">⚠ Failed to load map data</span>';
+                }
+            }
+
+            // Draw routes
+            flights.forEach(flight => {
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.setAttribute('d', createCurvedPath(AUCKLAND, flight));
+                path.setAttribute('class', `route ${flight.domestic ? 'domestic' : 'international'}`);
+                path.setAttribute('data-city', flight.city);
+                path.setAttribute('data-code', flight.code);
+                path.setAttribute('data-country', flight.country);
+                path.setAttribute('data-airlines', flight.airlines.join(', '));
+                path.setAttribute('data-domestic', flight.domestic);
+
+                path.addEventListener('mouseenter', showTooltip);
+                path.addEventListener('mousemove', moveTooltip);
+                path.addEventListener('mouseleave', hideTooltip);
+
+                routesGroup.appendChild(path);
+            });
+
+            // Draw Auckland (origin)
+            const aklPos = latLonToXY(AUCKLAND.lat, AUCKLAND.lon);
+            const aklCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            aklCircle.setAttribute('cx', aklPos.x);
+            aklCircle.setAttribute('cy', aklPos.y);
+            aklCircle.setAttribute('r', 6);
+            aklCircle.setAttribute('data-base-radius', 6);
+            aklCircle.setAttribute('class', 'airport origin');
+            aklCircle.setAttribute('data-city', AUCKLAND.name);
+            aklCircle.setAttribute('data-code', AUCKLAND.code);
+            aklCircle.addEventListener('mouseenter', (e) => {
+                tooltip.innerHTML = `<h3>Auckland International Airport</h3><div class="airlines">AKL • New Zealand</div>`;
+                tooltip.classList.add('visible');
+            });
+            aklCircle.addEventListener('mousemove', moveTooltip);
+            aklCircle.addEventListener('mouseleave', hideTooltip);
+            airportsGroup.appendChild(aklCircle);
+
+            // Draw destinations
+            flights.forEach(flight => {
+                const pos = latLonToXY(flight.lat, flight.lon);
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', pos.x);
+                circle.setAttribute('cy', pos.y);
+                circle.setAttribute('r', 4);
+                circle.setAttribute('data-base-radius', 4);
+                circle.setAttribute('class', 'airport destination');
+                circle.setAttribute('data-city', flight.city);
+                circle.setAttribute('data-code', flight.code);
+                circle.setAttribute('data-country', flight.country);
+                circle.setAttribute('data-airlines', flight.airlines.join(', '));
+                circle.setAttribute('data-domestic', flight.domestic);
+
+                circle.addEventListener('mouseenter', showTooltip);
+                circle.addEventListener('mousemove', moveTooltip);
+                circle.addEventListener('mouseleave', hideTooltip);
+
+                airportsGroup.appendChild(circle);
+            });
+
+            // Update stats
+            const domesticCount = flights.filter(f => f.domestic).length;
+            const internationalCount = flights.filter(f => !f.domestic).length;
+            const airlines = new Set(flights.flatMap(f => f.airlines));
+
+            document.getElementById('domestic-count').textContent = domesticCount;
+            document.getElementById('international-count').textContent = internationalCount;
+            document.getElementById('airline-count').textContent = airlines.size;
+        }
+
+        function showTooltip(e) {
+            const target = e.target;
+            const city = target.getAttribute('data-city');
+            const code = target.getAttribute('data-code');
+            const country = target.getAttribute('data-country');
+            const airlines = target.getAttribute('data-airlines');
+            const isDomestic = target.getAttribute('data-domestic') === 'true';
+
+            const tooltip = document.getElementById('tooltip');
+            tooltip.innerHTML = `
+                <span class="route-type ${isDomestic ? 'domestic' : 'international'}">${isDomestic ? 'Domestic' : 'International'}</span>
+                <h3>${city} (${code})</h3>
+                <div class="airlines"><strong>Airlines:</strong> ${airlines}</div>
+            `;
+            tooltip.classList.add('visible');
+        }
+
+        function moveTooltip(e) {
+            const tooltip = document.getElementById('tooltip');
+            tooltip.style.left = (e.clientX + 15) + 'px';
+            tooltip.style.top = (e.clientY + 15) + 'px';
+        }
+
+        function hideTooltip() {
+            const tooltip = document.getElementById('tooltip');
+            tooltip.classList.remove('visible');
+        }
+
+        // ==================== ZOOM & PAN FUNCTIONALITY ====================
+
+        // Zoom/pan state
+        const viewState = {
+            x: 0,
+            y: 0,
+            width: 1000,
+            height: 500,
+            minZoom: 0.5,   // 50% zoom out max
+            maxZoom: 8,     // 800% zoom in max
+            zoomStep: 1.3   // 30% zoom per step
+        };
+
+        // Original viewBox dimensions
+        const ORIGINAL_WIDTH = 1000;
+        const ORIGINAL_HEIGHT = 500;
+
+        // Get current zoom level as percentage
+        function getZoomLevel() {
+            return Math.round((ORIGINAL_WIDTH / viewState.width) * 100);
+        }
+
+        // Update viewBox and zoom display
+        function updateViewBox() {
+            const map = document.getElementById('map');
+            const zoomInfo = document.getElementById('zoom-info');
+
+            map.setAttribute('viewBox', `${viewState.x} ${viewState.y} ${viewState.width} ${viewState.height}`);
+            zoomInfo.textContent = `${getZoomLevel()}%`;
+
+            // Update airport circle sizes to maintain consistent screen size
+            updateAirportSizes();
+        }
+
+        // Update airport circle radii based on zoom level
+        // Icons scale with the map but have a minimum size to remain visible
+        function updateAirportSizes() {
+            const zoomLevel = ORIGINAL_WIDTH / viewState.width; // 1 = 100%, 2 = 200%, etc.
+            const airports = document.querySelectorAll('.airport');
+
+            airports.forEach(airport => {
+                const baseRadius = parseFloat(airport.getAttribute('data-base-radius')) || 4;
+                // Scale down as zoom increases, but maintain minimum visible size
+                const minRadius = baseRadius * 0.3; // Minimum 30% of base size
+                const scaledRadius = baseRadius / Math.sqrt(zoomLevel); // Gentle scaling
+                airport.setAttribute('r', Math.max(minRadius, scaledRadius));
+            });
+        }
+
+        // Zoom to a specific point
+        function zoomAtPoint(factor, clientX, clientY) {
+            const map = document.getElementById('map');
+            const rect = map.getBoundingClientRect();
+
+            // Calculate the point in SVG coordinates
+            const svgX = viewState.x + (clientX - rect.left) / rect.width * viewState.width;
+            const svgY = viewState.y + (clientY - rect.top) / rect.height * viewState.height;
+
+            // Calculate new dimensions
+            const newWidth = viewState.width / factor;
+            const newHeight = viewState.height / factor;
+
+            // Check zoom limits
+            const newZoom = ORIGINAL_WIDTH / newWidth;
+            if (newZoom < viewState.minZoom || newZoom > viewState.maxZoom) {
+                return;
+            }
+
+            // Adjust position to zoom toward the point
+            viewState.x = svgX - (svgX - viewState.x) / factor;
+            viewState.y = svgY - (svgY - viewState.y) / factor;
+            viewState.width = newWidth;
+            viewState.height = newHeight;
+
+            // Constrain to bounds
+            constrainViewBox();
+            updateViewBox();
+        }
+
+        // Zoom centered on the map
+        function zoomCentered(factor) {
+            const map = document.getElementById('map');
+            const rect = map.getBoundingClientRect();
+            zoomAtPoint(factor, rect.left + rect.width / 2, rect.top + rect.height / 2);
+        }
+
+        // Constrain viewBox to reasonable bounds
+        function constrainViewBox() {
+            // Allow some panning beyond the original bounds
+            const padding = viewState.width * 0.1;
+            const minX = -padding;
+            const maxX = ORIGINAL_WIDTH - viewState.width + padding;
+            const minY = -padding;
+            const maxY = ORIGINAL_HEIGHT - viewState.height + padding;
+
+            viewState.x = Math.max(minX, Math.min(maxX, viewState.x));
+            viewState.y = Math.max(minY, Math.min(maxY, viewState.y));
+        }
+
+        // Reset to original view
+        function resetView() {
+            viewState.x = 0;
+            viewState.y = 0;
+            viewState.width = ORIGINAL_WIDTH;
+            viewState.height = ORIGINAL_HEIGHT;
+            updateViewBox();
+        }
+
+        // Initialize zoom and pan controls
+        function initZoomPan() {
+            const map = document.getElementById('map');
+            const zoomIn = document.getElementById('zoom-in');
+            const zoomOut = document.getElementById('zoom-out');
+            const zoomReset = document.getElementById('zoom-reset');
+
+            // Button controls
+            zoomIn.addEventListener('click', () => zoomCentered(viewState.zoomStep));
+            zoomOut.addEventListener('click', () => zoomCentered(1 / viewState.zoomStep));
+            zoomReset.addEventListener('click', resetView);
+
+            // Mouse wheel zoom
+            map.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const factor = e.deltaY < 0 ? viewState.zoomStep : 1 / viewState.zoomStep;
+                zoomAtPoint(factor, e.clientX, e.clientY);
+            }, { passive: false });
+
+            // Pan with mouse drag
+            let isPanning = false;
+            let startX, startY;
+            let startViewX, startViewY;
+
+            map.addEventListener('mousedown', (e) => {
+                // Only pan with left mouse button
+                if (e.button !== 0) return;
+
+                isPanning = true;
+                startX = e.clientX;
+                startY = e.clientY;
+                startViewX = viewState.x;
+                startViewY = viewState.y;
+                map.classList.add('grabbing');
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isPanning) return;
+
+                const map = document.getElementById('map');
+                const rect = map.getBoundingClientRect();
+
+                // Calculate how much to pan in SVG coordinates
+                const dx = (e.clientX - startX) / rect.width * viewState.width;
+                const dy = (e.clientY - startY) / rect.height * viewState.height;
+
+                viewState.x = startViewX - dx;
+                viewState.y = startViewY - dy;
+
+                constrainViewBox();
+                updateViewBox();
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (isPanning) {
+                    isPanning = false;
+                    const map = document.getElementById('map');
+                    map.classList.remove('grabbing');
+                }
+            });
+
+            // Touch support for mobile
+            let lastTouchDist = 0;
+            let lastTouchCenter = { x: 0, y: 0 };
+
+            map.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) {
+                    // Single touch - pan
+                    isPanning = true;
+                    startX = e.touches[0].clientX;
+                    startY = e.touches[0].clientY;
+                    startViewX = viewState.x;
+                    startViewY = viewState.y;
+                    map.classList.add('grabbing');
+                } else if (e.touches.length === 2) {
+                    // Two touches - pinch zoom
+                    isPanning = false;
+                    const dx = e.touches[0].clientX - e.touches[1].clientX;
+                    const dy = e.touches[0].clientY - e.touches[1].clientY;
+                    lastTouchDist = Math.sqrt(dx * dx + dy * dy);
+                    lastTouchCenter = {
+                        x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+                        y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+                    };
+                }
+                e.preventDefault();
+            }, { passive: false });
+
+            map.addEventListener('touchmove', (e) => {
+                if (e.touches.length === 1 && isPanning) {
+                    // Pan
+                    const rect = map.getBoundingClientRect();
+                    const dx = (e.touches[0].clientX - startX) / rect.width * viewState.width;
+                    const dy = (e.touches[0].clientY - startY) / rect.height * viewState.height;
+
+                    viewState.x = startViewX - dx;
+                    viewState.y = startViewY - dy;
+
+                    constrainViewBox();
+                    updateViewBox();
+                } else if (e.touches.length === 2) {
+                    // Pinch zoom
+                    const dx = e.touches[0].clientX - e.touches[1].clientX;
+                    const dy = e.touches[0].clientY - e.touches[1].clientY;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (lastTouchDist > 0) {
+                        const factor = dist / lastTouchDist;
+                        const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                        const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                        zoomAtPoint(factor, centerX, centerY);
+                    }
+
+                    lastTouchDist = dist;
+                }
+                e.preventDefault();
+            }, { passive: false });
+
+            map.addEventListener('touchend', () => {
+                isPanning = false;
+                lastTouchDist = 0;
+                map.classList.remove('grabbing');
+            });
+
+            // Double click to zoom in
+            map.addEventListener('dblclick', (e) => {
+                e.preventDefault();
+                zoomAtPoint(viewState.zoomStep * 1.5, e.clientX, e.clientY);
+            });
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                // Only handle if map container is in view
+                if (e.key === '+' || e.key === '=') {
+                    zoomCentered(viewState.zoomStep);
+                } else if (e.key === '-') {
+                    zoomCentered(1 / viewState.zoomStep);
+                } else if (e.key === '0') {
+                    resetView();
+                }
+            });
+        }
+
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', async () => {
+            await initMap();
+            initZoomPan();
+        });
+    </script>
+</body>
+</html>
