@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Auckland Airport Flight Map</title>
+    <title>Wikipedia Flights Map</title>
     <style>
         * {
             margin: 0;
@@ -42,6 +43,67 @@
         .subtitle {
             color: #8892b0;
             font-size: 1rem;
+            margin-bottom: 20px;
+        }
+
+        .search-container {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            position: relative;
+        }
+
+        .search-input {
+            padding: 12px 20px;
+            font-size: 1rem;
+            width: 100%;
+            max-width: 400px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: #fff;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        .search-input:focus {
+            border-color: #00d4ff;
+            background: rgba(15, 23, 42, 0.8);
+            box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.2);
+        }
+
+        .search-btn {
+            padding: 12px 24px;
+            font-size: 1rem;
+            background: linear-gradient(135deg, #00d4ff 0%, #007cf0 100%);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .search-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 212, 255, 0.3);
+        }
+
+        .search-btn:active {
+            transform: translateY(0);
+        }
+
+        .status-message {
+            height: 24px;
+            font-size: 0.9rem;
+            color: #94a3b8;
+            margin-bottom: 10px;
+            transition: color 0.3s ease;
+        }
+
+        .status-message.error {
+            color: #ef4444;
         }
 
         .map-container {
@@ -141,7 +203,9 @@
         }
 
         @keyframes spin {
-            to { transform: rotate(360deg); }
+            to {
+                transform: rotate(360deg);
+            }
         }
 
         #map {
@@ -346,11 +410,19 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <header>
-            <h1>Auckland Airport Flight Routes</h1>
-            <p class="subtitle">Direct destinations from AKL • Data from Wikipedia</p>
+            <h1>Wiki Flight Map</h1>
+            <p class="subtitle">Visualise direct flights from any airport using Wikipedia data</p>
+
+            <div class="search-container">
+                <input type="text" class="search-input" id="airport-search"
+                    placeholder="Enter airport name (e.g. Heathrow Airport)" autocomplete="off">
+                <button class="search-btn" id="search-btn">Map Flights</button>
+            </div>
+            <div class="status-message" id="status-message"></div>
         </header>
 
         <div class="map-container">
@@ -374,1204 +446,1058 @@
 
         <div class="legend">
             <div class="legend-item">
-                <div class="legend-dot origin"></div>
-                <span>Auckland (AKL)</span>
+                <div class="legend-item">
+                    <div class="legend-dot origin"></div>
+                    <span id="legend-origin">Origin</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-dot destination"></div>
+                    <span>Destinations</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-line domestic"></div>
+                    <span>Domestic Routes</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-line international"></div>
+                    <span>International Routes</span>
+                </div>
             </div>
-            <div class="legend-item">
-                <div class="legend-dot destination"></div>
-                <span>Destinations</span>
+
+            <div class="stats">
+                <div class="stat">
+                    <div class="stat-value" id="domestic-count">0</div>
+                    <div class="stat-label">Domestic Destinations</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="international-count">0</div>
+                    <div class="stat-label">International Destinations</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="airline-count">0</div>
+                    <div class="stat-label">Airlines</div>
+                </div>
             </div>
-            <div class="legend-item">
-                <div class="legend-line domestic"></div>
-                <span>Domestic Routes</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-line international"></div>
-                <span>International Routes</span>
-            </div>
+
+            <footer>
+                <p>Data sourced from <a href="https://en.wikipedia.org/wiki/Main_Page" target="_blank"
+                        id="source-link">Wikipedia</a></p>
+            </footer>
         </div>
 
-        <div class="stats">
-            <div class="stat">
-                <div class="stat-value" id="domestic-count">0</div>
-                <div class="stat-label">Domestic Destinations</div>
-            </div>
-            <div class="stat">
-                <div class="stat-value" id="international-count">0</div>
-                <div class="stat-label">International Destinations</div>
-            </div>
-            <div class="stat">
-                <div class="stat-value" id="airline-count">0</div>
-                <div class="stat-label">Airlines</div>
-            </div>
-        </div>
+        <div class="tooltip" id="tooltip"></div>
 
-        <footer>
-            <p>Data sourced from <a href="https://en.wikipedia.org/wiki/Auckland_Airport" target="_blank">Wikipedia - Auckland Airport</a></p>
-        </footer>
-    </div>
+        <script>
+            // State
+            let currentOrigin = null;
+            let currentDestinations = [];
 
-    <div class="tooltip" id="tooltip"></div>
+            class WikiService {
+                constructor() {
+                    this.baseUrl = 'https://en.wikipedia.org/w/api.php';
+                    this.userAgent = 'WikiFlights/1.0 (mailto:test@example.com)';
+                }
 
-    <script>
-        // Auckland Airport coordinates
-        const AUCKLAND = { lat: -36.8509, lon: 174.7645, name: "Auckland", code: "AKL" };
+                async search(query) {
+                    console.log(`[WikiService] Searching for: "${query}"`);
+                    const params = new URLSearchParams({
+                        action: 'opensearch',
+                        search: query,
+                        limit: 10,
+                        namespace: 0,
+                        format: 'json',
+                        origin: '*'
+                    });
 
-        // Flight data from Auckland Airport
-        const flights = [
-          {
-            city: "Adelaide",
-            code: "ADL",
-            lat: -34.9462,
-            lon: 138.5332,
-            country: "Australia",
-            airlines: ["Air New Zealand", "Qantas"],
-            domestic: false
-          },
-          {
-            city: "Apia",
-            code: "APW",
-            lat: -13.8314,
-            lon: -172.0005,
-            country: "Samoa",
-            airlines: ["Air New Zealand", "Qantas"],
-            domestic: false
-          },
-          {
-            city: "Beijing",
-            code: "PEK",
-            lat: 40.0799,
-            lon: 116.6031,
-            country: "China",
-            airlines: ["Air China"],
-            domestic: false
-          },
-          {
-            city: "Blenheim",
-            code: "BHE",
-            lat: -41.5183,
-            lon: 173.8707,
-            country: "New Zealand",
-            airlines: ["Air Chathams", "Air New Zealand"],
-            domestic: true
-          },
-          {
-            city: "Brisbane",
-            code: "BNE",
-            lat: -27.3842,
-            lon: 153.1175,
-            country: "Australia",
-            airlines: ["Air New Zealand", "China Airlines", "Jetstar", "Qantas", "Solomon Airlines"],
-            domestic: false
-          },
-          {
-            city: "Buenos Aires",
-            code: "EZE",
-            lat: -34.8150,
-            lon: -58.5348,
-            country: "Argentina",
-            airlines: ["China Eastern Airlines"],
-            domestic: false
-          },
-          {
-            city: "Cairns",
-            code: "CNS",
-            lat: -16.8858,
-            lon: 145.7552,
-            country: "Australia",
-            airlines: ["Air New Zealand"],
-            domestic: false
-          },
-          {
-            city: "Chatham Islands",
-            code: "CHT",
-            lat: -43.8119,
-            lon: -176.4649,
-            country: "New Zealand",
-            airlines: ["Air Chathams"],
-            domestic: true
-          },
-          {
-            city: "Chengdu",
-            code: "TFU",
-            lat: 30.3347,
-            lon: 104.4502,
-            country: "China",
-            airlines: ["Sichuan Airlines"],
-            domestic: false
-          },
-          {
-            city: "Christchurch",
-            code: "CHC",
-            lat: -43.4894,
-            lon: 172.5322,
-            country: "New Zealand",
-            airlines: ["Air New Zealand", "Jetstar"],
-            domestic: true
-          },
-          {
-            city: "Chongqing",
-            code: "CKG",
-            lat: 29.7192,
-            lon: 106.6417,
-            country: "China",
-            airlines: ["Hainan Airlines"],
-            domestic: false
-          },
-          {
-            city: "Claris (Great Barrier)",
-            code: "GBZ",
-            lat: -36.2394,
-            lon: 175.4719,
-            country: "New Zealand",
-            airlines: ["Barrier Air"],
-            domestic: true
-          },
-          {
-            city: "Dallas/Fort Worth",
-            code: "DFW",
-            lat: 32.8998,
-            lon: -97.0403,
-            country: "United States",
-            airlines: ["American Airlines"],
-            domestic: false
-          },
-          {
-            city: "Denpasar",
-            code: "DPS",
-            lat: -8.7467,
-            lon: 115.1668,
-            country: "Indonesia",
-            airlines: ["Air New Zealand"],
-            domestic: false
-          },
-          {
-            city: "Doha",
-            code: "DOH",
-            lat: 25.2609,
-            lon: 51.5651,
-            country: "Qatar",
-            airlines: ["Qatar Airways"],
-            domestic: false
-          },
-          {
-            city: "Dubai",
-            code: "DXB",
-            lat: 25.2532,
-            lon: 55.3657,
-            country: "United Arab Emirates",
-            airlines: ["Emirates"],
-            domestic: false
-          },
-          {
-            city: "Dunedin",
-            code: "DUD",
-            lat: -45.9281,
-            lon: 170.1983,
-            country: "New Zealand",
-            airlines: ["Air New Zealand", "Jetstar"],
-            domestic: true
-          },
-          {
-            city: "Gisborne",
-            code: "GIS",
-            lat: -38.6633,
-            lon: 177.9781,
-            country: "New Zealand",
-            airlines: ["Air New Zealand"],
-            domestic: true
-          },
-          {
-            city: "Gold Coast",
-            code: "OOL",
-            lat: -28.1645,
-            lon: 153.5053,
-            country: "Australia",
-            airlines: ["Air New Zealand", "Jetstar", "Qantas"],
-            domestic: false
-          },
-          {
-            city: "Guangzhou",
-            code: "CAN",
-            lat: 23.3959,
-            lon: 113.2970,
-            country: "China",
-            airlines: ["China Southern Airlines"],
-            domestic: false
-          },
-          {
-            city: "Haikou",
-            code: "HAK",
-            lat: 19.9348,
-            lon: 110.4589,
-            country: "China",
-            airlines: ["Hainan Airlines"],
-            domestic: false
-          },
-          {
-            city: "Hangzhou",
-            code: "HGH",
-            lat: 30.2295,
-            lon: 120.4344,
-            country: "China",
-            airlines: ["China Eastern Airlines"],
-            domestic: false
-          },
-          {
-            city: "Hobart",
-            code: "HBA",
-            lat: -42.8361,
-            lon: 147.5103,
-            country: "Australia",
-            airlines: ["Air New Zealand"],
-            domestic: false
-          },
-          {
-            city: "Hong Kong",
-            code: "HKG",
-            lat: 22.3080,
-            lon: 113.9185,
-            country: "Hong Kong",
-            airlines: ["Air New Zealand", "Cathay Pacific"],
-            domestic: false
-          },
-          {
-            city: "Honiara",
-            code: "HIR",
-            lat: -9.4286,
-            lon: 160.0547,
-            country: "Solomon Islands",
-            airlines: ["Solomon Airlines"],
-            domestic: false
-          },
-          {
-            city: "Honolulu",
-            code: "HNL",
-            lat: 21.3187,
-            lon: -157.9213,
-            country: "United States",
-            airlines: ["Air New Zealand", "Hawaiian Airlines"],
-            domestic: false
-          },
-          {
-            city: "Houston",
-            code: "IAH",
-            lat: 29.9902,
-            lon: -95.3368,
-            country: "United States",
-            airlines: ["Air New Zealand"],
-            domestic: false
-          },
-          {
-            city: "Invercargill",
-            code: "IVC",
-            lat: -46.4163,
-            lon: 168.3204,
-            country: "New Zealand",
-            airlines: ["Air New Zealand"],
-            domestic: true
-          },
-          {
-            city: "Kaitaia",
-            code: "KAT",
-            lat: -35.0700,
-            lon: 173.2872,
-            country: "New Zealand",
-            airlines: ["Barrier Air"],
-            domestic: true
-          },
-          {
-            city: "Kapiti Coast",
-            code: "PPQ",
-            lat: -40.9047,
-            lon: 174.9847,
-            country: "New Zealand",
-            airlines: ["Air Chathams"],
-            domestic: true
-          },
-          {
-            city: "Kerikeri",
-            code: "KKE",
-            lat: -35.2636,
-            lon: 173.9119,
-            country: "New Zealand",
-            airlines: ["Air New Zealand", "Barrier Air"],
-            domestic: true
-          },
-          {
-            city: "Kuala Lumpur",
-            code: "KUL",
-            lat: 2.7456,
-            lon: 101.7072,
-            country: "Malaysia",
-            airlines: ["Malaysia Airlines"],
-            domestic: false
-          },
-          {
-            city: "Los Angeles",
-            code: "LAX",
-            lat: 33.9416,
-            lon: -118.4085,
-            country: "United States",
-            airlines: ["Air New Zealand", "Air Tahiti Nui", "American Airlines", "Delta Air Lines"],
-            domestic: false
-          },
-          {
-            city: "Melbourne",
-            code: "MEL",
-            lat: -37.6637,
-            lon: 144.8348,
-            country: "Australia",
-            airlines: ["Air New Zealand", "Jetstar", "Qantas"],
-            domestic: false
-          },
-          {
-            city: "Nadi",
-            code: "NAN",
-            lat: -17.7554,
-            lon: 177.4430,
-            country: "Fiji",
-            airlines: ["Air New Zealand", "Fiji Airways"],
-            domestic: false
-          },
-          {
-            city: "Napier",
-            code: "NPE",
-            lat: -39.4658,
-            lon: 176.8703,
-            country: "New Zealand",
-            airlines: ["Air New Zealand"],
-            domestic: true
-          },
-          {
-            city: "Nelson",
-            code: "NSN",
-            lat: -41.2982,
-            lon: 173.2241,
-            country: "New Zealand",
-            airlines: ["Air New Zealand"],
-            domestic: true
-          },
-          {
-            city: "New Plymouth",
-            code: "NPL",
-            lat: -39.0086,
-            lon: 174.1794,
-            country: "New Zealand",
-            airlines: ["Air New Zealand"],
-            domestic: true
-          },
-          {
-            city: "New York",
-            code: "JFK",
-            lat: 40.6413,
-            lon: -73.7781,
-            country: "United States",
-            airlines: ["Air New Zealand", "Qantas"],
-            domestic: false
-          },
-          {
-            city: "Niue",
-            code: "IUE",
-            lat: -19.0801,
-            lon: -169.9261,
-            country: "Niue",
-            airlines: ["Air New Zealand"],
-            domestic: false
-          },
-          {
-            city: "Nouméa",
-            code: "NOU",
-            lat: -22.0142,
-            lon: 166.2128,
-            country: "New Caledonia",
-            airlines: ["Air New Zealand", "Aircalin"],
-            domestic: false
-          },
-          {
-            city: "Nuku'alofa",
-            code: "TBU",
-            lat: -21.2408,
-            lon: -175.1408,
-            country: "Tonga",
-            airlines: ["Air New Zealand"],
-            domestic: false
-          },
-          {
-            city: "Palmerston North",
-            code: "PMR",
-            lat: -40.3208,
-            lon: 175.6171,
-            country: "New Zealand",
-            airlines: ["Air New Zealand"],
-            domestic: true
-          },
-          {
-            city: "Papeete",
-            code: "PPT",
-            lat: -17.5536,
-            lon: -149.6057,
-            country: "French Polynesia",
-            airlines: ["Air New Zealand", "Air Tahiti Nui"],
-            domestic: false
-          },
-          {
-            city: "Perth",
-            code: "PER",
-            lat: -31.9385,
-            lon: 115.9672,
-            country: "Australia",
-            airlines: ["Air New Zealand", "Qantas"],
-            domestic: false
-          },
-          {
-            city: "Port Vila",
-            code: "VLI",
-            lat: -17.6993,
-            lon: 168.3198,
-            country: "Vanuatu",
-            airlines: ["Solomon Airlines"],
-            domestic: false
-          },
-          {
-            city: "Queenstown",
-            code: "ZQN",
-            lat: -45.0210,
-            lon: 168.7396,
-            country: "New Zealand",
-            airlines: ["Air New Zealand", "Jetstar"],
-            domestic: true
-          },
-          {
-            city: "Rarotonga",
-            code: "RAR",
-            lat: -21.2014,
-            lon: -159.8061,
-            country: "Cook Islands",
-            airlines: ["Air New Zealand", "Jetstar"],
-            domestic: false
-          },
-          {
-            city: "Rotorua",
-            code: "ROT",
-            lat: -38.1092,
-            lon: 176.3172,
-            country: "New Zealand",
-            airlines: ["Air New Zealand"],
-            domestic: true
-          },
-          {
-            city: "San Francisco",
-            code: "SFO",
-            lat: 37.6213,
-            lon: -122.3790,
-            country: "United States",
-            airlines: ["Air New Zealand", "United Airlines"],
-            domestic: false
-          },
-          {
-            city: "Santiago de Chile",
-            code: "SCL",
-            lat: -33.3930,
-            lon: -70.7858,
-            country: "Chile",
-            airlines: ["LATAM Chile"],
-            domestic: false
-          },
-          {
-            city: "Seoul",
-            code: "ICN",
-            lat: 37.4602,
-            lon: 126.4407,
-            country: "South Korea",
-            airlines: ["Korean Air"],
-            domestic: false
-          },
-          {
-            city: "Shanghai",
-            code: "PVG",
-            lat: 31.1443,
-            lon: 121.8083,
-            country: "China",
-            airlines: ["Air New Zealand", "China Eastern Airlines"],
-            domestic: false
-          },
-          {
-            city: "Shenzhen",
-            code: "SZX",
-            lat: 22.6393,
-            lon: 113.8107,
-            country: "China",
-            airlines: ["Hainan Airlines"],
-            domestic: false
-          },
-          {
-            city: "Singapore",
-            code: "SIN",
-            lat: 1.3644,
-            lon: 103.9915,
-            country: "Singapore",
-            airlines: ["Air New Zealand", "Singapore Airlines"],
-            domestic: false
-          },
-          {
-            city: "Sunshine Coast",
-            code: "MCY",
-            lat: -26.6033,
-            lon: 153.0908,
-            country: "Australia",
-            airlines: ["Air New Zealand", "Jetstar"],
-            domestic: false
-          },
-          {
-            city: "Sydney",
-            code: "SYD",
-            lat: -33.9399,
-            lon: 151.1753,
-            country: "Australia",
-            airlines: ["Air New Zealand", "China Eastern Airlines", "Jetstar", "Qantas"],
-            domestic: false
-          },
-          {
-            city: "Taipei",
-            code: "TPE",
-            lat: 25.0797,
-            lon: 121.2342,
-            country: "Taiwan",
-            airlines: ["Air New Zealand", "China Airlines"],
-            domestic: false
-          },
-          {
-            city: "Taupō",
-            code: "TUO",
-            lat: -38.7408,
-            lon: 176.0847,
-            country: "New Zealand",
-            airlines: ["Air New Zealand"],
-            domestic: true
-          },
-          {
-            city: "Tauranga",
-            code: "TRG",
-            lat: -37.6719,
-            lon: 176.1961,
-            country: "New Zealand",
-            airlines: ["Air New Zealand"],
-            domestic: true
-          },
-          {
-            city: "Tokyo",
-            code: "NRT",
-            lat: 35.7720,
-            lon: 140.3929,
-            country: "Japan",
-            airlines: ["Air New Zealand"],
-            domestic: false
-          },
-          {
-            city: "Vancouver",
-            code: "YVR",
-            lat: 49.1947,
-            lon: -123.1760,
-            country: "Canada",
-            airlines: ["Air Canada", "Air New Zealand"],
-            domestic: false
-          },
-          {
-            city: "Wellington",
-            code: "WLG",
-            lat: -41.3272,
-            lon: 174.8052,
-            country: "New Zealand",
-            airlines: ["Air New Zealand", "Jetstar"],
-            domestic: true
-          },
-          {
-            city: "Whakatāne",
-            code: "WHK",
-            lat: -37.9208,
-            lon: 176.9142,
-            country: "New Zealand",
-            airlines: ["Air Chathams"],
-            domestic: true
-          },
-          {
-            city: "Whanganui",
-            code: "WAG",
-            lat: -39.9622,
-            lon: 175.0250,
-            country: "New Zealand",
-            airlines: ["Air Chathams"],
-            domestic: true
-          },
-          {
-            city: "Whangārei",
-            code: "WRE",
-            lat: -35.7684,
-            lon: 174.3644,
-            country: "New Zealand",
-            airlines: ["Air New Zealand"],
-            domestic: true
-          },
-          {
-            city: "Whitianga",
-            code: "WTZ",
-            lat: -36.8328,
-            lon: 175.6806,
-            country: "New Zealand",
-            airlines: ["Barrier Air"],
-            domestic: true
-          }
-        ];
-        // GeoJSON URL for Natural Earth 110m countries (low resolution, good for web)
-        const GEOJSON_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
+                    try {
+                        const response = await fetch(`${this.baseUrl}?${params}`);
+                        const data = await response.json();
+                        // opensearch returns [query, [titles], [descriptions], [urls]]
+                        const results = data[1].map((title, index) => ({
+                            title: title,
+                            url: data[3][index]
+                        }));
+                        console.log(`[WikiService] Search results for "${query}":`, results);
+                        return results;
+                    } catch (error) {
+                        console.error('[WikiService] Search failed:', error);
+                        return [];
+                    }
+                }
 
-        // Central meridian - centred on Pacific, adjusted to keep Europe/Africa visible
-        // 160° keeps NZ on the right side while ensuring Europe/Africa aren't cut off at the left edge
-        const CENTRAL_MERIDIAN = 160;
+                async getAirportData(title) {
+                    console.log(`[WikiService] Fetching airport data for: "${title}"`);
 
-        // Convert lat/lon to SVG coordinates (Mercator-like projection centred on NZ)
-        function latLonToXY(lat, lon) {
-            // Shift longitude relative to central meridian and wrap
-            let adjustedLon = lon - CENTRAL_MERIDIAN;
-            // Normalize to -180 to 180 range
-            while (adjustedLon > 180) adjustedLon -= 360;
-            while (adjustedLon < -180) adjustedLon += 360;
+                    // We need two things:
+                    // 1. Reliable coordinates (best from action=query)
+                    // 2. HTML content to parse destinations (from action=parse)
 
-            const x = (adjustedLon + 180) * (1000 / 360);
-            const latRad = lat * Math.PI / 180;
-            const mercN = Math.log(Math.tan((Math.PI / 4) + (latRad / 2)));
-            const y = (500 / 2) - (1000 * mercN / (2 * Math.PI)) * 0.8;
-            return { x, y: Math.max(20, Math.min(480, y)) };
-        }
+                    const queryParams = new URLSearchParams({
+                        action: 'query',
+                        titles: title,
+                        prop: 'coordinates|pageprops',
+                        format: 'json',
+                        origin: '*',
+                        redirects: 1
+                    });
 
-        // Convert a ring of coordinates [lon, lat] to SVG path
-        function ringToPath(ring) {
-            if (!ring || ring.length < 3) return '';
+                    const parseParams = new URLSearchParams({
+                        action: 'parse',
+                        page: title,
+                        prop: 'text',
+                        format: 'json',
+                        origin: '*',
+                        redirects: 1
+                    });
 
-            const points = ring.map(([lon, lat]) => latLonToXY(lat, lon));
+                    try {
+                        const [queryResp, parseResp] = await Promise.all([
+                            fetch(`${this.baseUrl}?${queryParams}`),
+                            fetch(`${this.baseUrl}?${parseParams}`)
+                        ]);
 
-            // Check if polygon crosses the map edge
-            let crossesEdge = false;
-            for (let i = 1; i < points.length; i++) {
-                if (Math.abs(points[i].x - points[i-1].x) > 500) {
-                    crossesEdge = true;
-                    break;
+                        const queryData = await queryResp.json();
+                        const parseData = await parseResp.json();
+
+                        // Process Coordinates
+                        let coordinates = null;
+                        let realTitle = title;
+
+                        if (queryData.query && queryData.query.pages) {
+                            const pages = Object.values(queryData.query.pages);
+                            if (pages.length > 0) {
+                                const page = pages[0];
+                                realTitle = page.title; // Get the resolved title after redirects
+                                if (page.coordinates) {
+                                    coordinates = {
+                                        lat: page.coordinates[0].lat,
+                                        lon: page.coordinates[0].lon
+                                    };
+                                }
+                            }
+                        }
+
+                        // Process HTML
+                        let html = '';
+                        if (parseData.parse && parseData.parse.text) {
+                            html = parseData.parse.text['*'];
+                            // If title changed in query (redirect), rely on query's title, 
+                            // but parse usually handles its own redirects too.
+                        } else {
+                            console.warn(`[WikiService] No parse text returned for "${title}"`);
+                        }
+
+                        console.log(`[WikiService] Data fetched for "${realTitle}". Coordinates found: ${!!coordinates}`);
+
+                        // We need both to be useful, but TECHNICALLY we could map the airport without destinations
+                        // or have destinations without a map... but let's require coordinates for the Origin.
+
+                        return {
+                            title: realTitle,
+                            html: html,
+                            coordinates: coordinates
+                        };
+
+                    } catch (error) {
+                        console.error('[WikiService] Failed to get airport data:', error);
+                        return null;
+                    }
+                }
+
+                parseDestinations(html) {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+
+                    // Find the "Airlines and destinations" header
+                    // It might be a simple H2, or wrapped in a div like <div class="mw-heading mw-heading2"><h2...>
+                    const h2List = Array.from(doc.querySelectorAll('h2'));
+                    let headerNode = null;
+
+                    for (const h2 of h2List) {
+                        if (h2.textContent.includes('Airlines and destinations') ||
+                            h2.id === 'Airlines_and_destinations') {
+
+                            // Check if wrapped in a MediaWiki heading div
+                            if (h2.parentElement && h2.parentElement.classList.contains('mw-heading')) {
+                                headerNode = h2.parentElement;
+                            } else {
+                                headerNode = h2;
+                            }
+                            console.log(`[WikiService] Found "Airlines and destinations" header anchor: <${headerNode.tagName}>`);
+                            break;
+                        }
+                    }
+
+                    if (!headerNode) {
+                        console.warn('[WikiService] "Airlines and destinations" header not found.');
+                        return [];
+                    }
+
+                    // Scan siblings for tables until the next H2
+                    const destinationTables = [];
+                    let currentNode = headerNode.nextElementSibling;
+                    const maxNodesToCheck = 100; // Safety brake
+                    let nodesChecked = 0;
+
+                    while (currentNode && nodesChecked < maxNodesToCheck) {
+                        const tag = currentNode.tagName;
+
+                        // Stop if we hit the next major section (H2)
+                        // Also check if it's a wrapper for H2
+                        if (tag === 'H2') break;
+                        if (tag === 'DIV' && currentNode.classList.contains('mw-heading2')) break;
+                        if (currentNode.querySelector && currentNode.querySelector('h2')) break;
+
+                        // Check if this node IS a table
+                        if (tag === 'TABLE' && currentNode.classList.contains('wikitable')) {
+                            destinationTables.push(currentNode);
+                            console.log('[WikiService] Found flight table (sibling match)');
+                        }
+                        // Check if this node CONTAINS a table (e.g. wrapped in div)
+                        else if (currentNode.querySelector) {
+                            const tables = currentNode.querySelectorAll('table.wikitable');
+                            if (tables.length > 0) {
+                                tables.forEach(t => destinationTables.push(t));
+                                console.log(`[WikiService] Found ${tables.length} nested flight table(s)`);
+                            }
+                        }
+
+                        currentNode = currentNode.nextElementSibling;
+                        nodesChecked++;
+                    }
+
+                    if (destinationTables.length === 0) {
+                        console.warn('[WikiService] No "wikitable" found in "Airlines and destinations" section.');
+                        return [];
+                    }
+
+                    console.log(`[WikiService] Found ${destinationTables.length} table(s) to parse.`);
+
+                    // Parse all found tables
+                    const destinations = [];
+
+                    destinationTables.forEach((table, index) => {
+                        const rows = table.querySelectorAll('tr');
+                        console.log(`[WikiService] Parsing table #${index + 1} with ${rows.length} rows`);
+
+                        let currentAirline = '';
+
+                        rows.forEach(row => {
+                            const cells = row.querySelectorAll('td');
+                            if (cells.length === 0) return; // Skip header
+
+                            let airlineCell, destCell;
+
+                            // Typical structure: [Airline Name] [Destinations]
+                            // Sometimes spans complicate things, but usually:
+                            // If 2+ cells: Airline is first, Dests is second/last
+                            // If 1 cell: Dests (continuation of previous airline)
+
+                            // Note: Wikipedia tables are complex. 
+                            // Standard flight table: Airline | Destinations
+                            // Sometimes: Airline | Destinations | Notes (3 cols)
+
+                            if (cells.length >= 2) {
+                                airlineCell = cells[0];
+                                // Identify destination cell - usually the last one or second one?
+                                // In 2-col: index 1. In 3-col: index 1 is dests usually.
+                                destCell = cells[1];
+
+                                // Clean airline name, remove reference links [1]
+                                currentAirline = airlineCell.textContent.replace(/\[.*?\]/g, '').trim();
+                            } else if (cells.length === 1) {
+                                destCell = cells[0];
+                            }
+
+                            if (!destCell || !currentAirline) return;
+
+                            // Extract links
+                            const links = destCell.querySelectorAll('a');
+                            links.forEach(link => {
+                                // Skip citations, broken links
+                                if (link.href.includes('#cite') || link.classList.contains('new') || !link.title) return;
+
+                                destinations.push({
+                                    city: link.textContent.trim(),
+                                    title: link.title,
+                                    airline: currentAirline
+                                });
+                            });
+                        });
+                    });
+
+                    console.log(`[WikiService] Parsed ${destinations.length} total destinations.`);
+                    return destinations;
+                }
+
+                async getCoordinates(titles) {
+                    console.log(`[WikiService] Fetching coordinates for ${titles.length} titles...`);
+                    // Wikipedia API allows batching up to 50 titles
+                    const chunks = [];
+                    for (let i = 0; i < titles.length; i += 50) {
+                        chunks.push(titles.slice(i, i + 50));
+                    }
+
+                    const results = {};
+
+                    for (const chunk of chunks) {
+                        const params = new URLSearchParams({
+                            action: 'query',
+                            titles: chunk.join('|'),
+                            prop: 'coordinates',
+                            format: 'json',
+                            origin: '*'
+                        });
+
+                        try {
+                            const response = await fetch(`${this.baseUrl}?${params}`);
+                            const data = await response.json();
+
+                            if (data.query && data.query.pages) {
+                                Object.values(data.query.pages).forEach(page => {
+                                    if (page.coordinates) {
+                                        results[page.title] = {
+                                            lat: page.coordinates[0].lat,
+                                            lon: page.coordinates[0].lon
+                                        };
+                                    }
+                                });
+                            }
+                        } catch (error) {
+                            console.error('[WikiService] Batch coordinates fetch failed:', error);
+                        }
+                    }
+
+                    console.log(`[WikiService] Resolved coordinates for ${Object.keys(results).length} / ${titles.length} titles`);
+                    return results;
                 }
             }
 
-            if (crossesEdge) {
-                // Split polygon at the edge - simplified approach
-                // Just skip small polygons that cross, render larger ones partially
-                return '';
+            const wikiService = new WikiService();
+            // GeoJSON URL for Natural Earth 110m countries (local copy)
+            const GEOJSON_URL = 'countries-110m.json';
+
+            // Central meridian - centred on Pacific, adjusted to keep Europe/Africa visible
+            // 160° keeps NZ on the right side while ensuring Europe/Africa aren't cut off at the left edge
+            // Central meridian - dynamic based on airport location
+            let CENTRAL_MERIDIAN = 160;
+
+            // Convert lat/lon to SVG coordinates (Mercator-like projection centred on NZ)
+            function latLonToXY(lat, lon) {
+                // Shift longitude relative to central meridian and wrap
+                let adjustedLon = lon - CENTRAL_MERIDIAN;
+                // Normalize to -180 to 180 range
+                while (adjustedLon > 180) adjustedLon -= 360;
+                while (adjustedLon < -180) adjustedLon += 360;
+
+                const x = (adjustedLon + 180) * (1000 / 360);
+                const latRad = lat * Math.PI / 180;
+                const mercN = Math.log(Math.tan((Math.PI / 4) + (latRad / 2)));
+                const y = (500 / 2) - (1000 * mercN / (2 * Math.PI)) * 0.8;
+                return { x, y: Math.max(20, Math.min(480, y)) };
             }
 
-            let path = `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
-            for (let i = 1; i < points.length; i++) {
-                path += ` L ${points[i].x.toFixed(1)} ${points[i].y.toFixed(1)}`;
-            }
-            path += ' Z';
-            return path;
-        }
+            // Convert a ring of coordinates [lon, lat] to SVG path
+            function ringToPath(ring) {
+                if (!ring || ring.length < 3) return '';
 
-        // Decode TopoJSON arc
-        function decodeArc(topology, arcIndex) {
-            const arc = topology.arcs[arcIndex < 0 ? ~arcIndex : arcIndex];
-            const points = [];
-            let x = 0, y = 0;
+                const points = ring.map(([lon, lat]) => latLonToXY(lat, lon));
 
-            for (const [dx, dy] of arc) {
-                x += dx;
-                y += dy;
-                points.push([
-                    x * topology.transform.scale[0] + topology.transform.translate[0],
-                    y * topology.transform.scale[1] + topology.transform.translate[1]
-                ]);
-            }
-
-            if (arcIndex < 0) {
-                points.reverse();
-            }
-
-            return points;
-        }
-
-        // Convert TopoJSON arcs to coordinates
-        function arcsToCoordinates(topology, arcs) {
-            const coordinates = [];
-            for (const arcIndex of arcs) {
-                const decoded = decodeArc(topology, arcIndex);
-                // Avoid duplicate points at arc boundaries
-                if (coordinates.length > 0) {
-                    decoded.shift();
+                // Check if polygon crosses the map edge
+                let crossesEdge = false;
+                for (let i = 1; i < points.length; i++) {
+                    if (Math.abs(points[i].x - points[i - 1].x) > 500) {
+                        crossesEdge = true;
+                        break;
+                    }
                 }
-                coordinates.push(...decoded);
-            }
-            return coordinates;
-        }
 
-        // Convert TopoJSON geometry to SVG paths
-        function geometryToSVGPaths(topology, geometry) {
-            const paths = [];
-
-            if (geometry.type === 'Polygon') {
-                for (const ring of geometry.arcs) {
-                    const coords = arcsToCoordinates(topology, ring);
-                    const path = ringToPath(coords);
-                    if (path) paths.push(path);
+                if (crossesEdge) {
+                    // Split polygon at the edge - simplified approach
+                    // Just skip small polygons that cross, render larger ones partially
+                    return '';
                 }
-            } else if (geometry.type === 'MultiPolygon') {
-                for (const polygon of geometry.arcs) {
-                    for (const ring of polygon) {
+
+                let path = `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
+                for (let i = 1; i < points.length; i++) {
+                    path += ` L ${points[i].x.toFixed(1)} ${points[i].y.toFixed(1)}`;
+                }
+                path += ' Z';
+                return path;
+            }
+
+            // Decode TopoJSON arc
+            function decodeArc(topology, arcIndex) {
+                const arc = topology.arcs[arcIndex < 0 ? ~arcIndex : arcIndex];
+                const points = [];
+                let x = 0, y = 0;
+
+                for (const [dx, dy] of arc) {
+                    x += dx;
+                    y += dy;
+                    points.push([
+                        x * topology.transform.scale[0] + topology.transform.translate[0],
+                        y * topology.transform.scale[1] + topology.transform.translate[1]
+                    ]);
+                }
+
+                if (arcIndex < 0) {
+                    points.reverse();
+                }
+
+                return points;
+            }
+
+            // Convert TopoJSON arcs to coordinates
+            function arcsToCoordinates(topology, arcs) {
+                const coordinates = [];
+                for (const arcIndex of arcs) {
+                    const decoded = decodeArc(topology, arcIndex);
+                    // Avoid duplicate points at arc boundaries
+                    if (coordinates.length > 0) {
+                        decoded.shift();
+                    }
+                    coordinates.push(...decoded);
+                }
+                return coordinates;
+            }
+
+            // Convert TopoJSON geometry to SVG paths
+            function geometryToSVGPaths(topology, geometry) {
+                const paths = [];
+
+                if (geometry.type === 'Polygon') {
+                    for (const ring of geometry.arcs) {
                         const coords = arcsToCoordinates(topology, ring);
                         const path = ringToPath(coords);
                         if (path) paths.push(path);
                     }
-                }
-            }
-
-            return paths;
-        }
-
-        // Load and parse TopoJSON
-        async function loadWorldMap() {
-            try {
-                const response = await fetch(GEOJSON_URL);
-                if (!response.ok) throw new Error('Network response was not ok');
-                const topology = await response.json();
-
-                // Verify topology has required transform property
-                if (!topology.transform) {
-                    throw new Error('Invalid TopoJSON format');
-                }
-
-                const paths = [];
-                const countries = topology.objects.countries;
-
-                if (countries.type === 'GeometryCollection') {
-                    for (const geometry of countries.geometries) {
-                        const countryPaths = geometryToSVGPaths(topology, geometry);
-                        paths.push(...countryPaths);
+                } else if (geometry.type === 'MultiPolygon') {
+                    for (const polygon of geometry.arcs) {
+                        for (const ring of polygon) {
+                            const coords = arcsToCoordinates(topology, ring);
+                            const path = ringToPath(coords);
+                            if (path) paths.push(path);
+                        }
                     }
                 }
 
-                return { success: true, paths };
-            } catch (error) {
-                console.error('Failed to load world map:', error);
-                return { success: false, paths: [] };
+                return paths;
             }
-        }
 
-        // Create curved path between two points
-        function createCurvedPath(from, to) {
-            const start = latLonToXY(from.lat, from.lon);
-            const end = latLonToXY(to.lat, to.lon);
+            // Load and parse TopoJSON
+            async function loadWorldMap() {
+                try {
+                    const response = await fetch(GEOJSON_URL);
+                    if (!response.ok) throw new Error('Network response was not ok');
+                    const topology = await response.json();
 
-            // Handle paths that cross the map edge
-            let endX = end.x;
-            const directDist = Math.abs(end.x - start.x);
-            const wrapDist = 1000 - directDist;
+                    // Verify topology has required transform property
+                    if (!topology.transform) {
+                        throw new Error('Invalid TopoJSON format');
+                    }
 
-            if (wrapDist < directDist) {
-                // Path crosses edge, wrap around
-                if (end.x < start.x) {
-                    endX = end.x + 1000;
+                    const paths = [];
+                    const countries = topology.objects.countries;
+
+                    if (countries.type === 'GeometryCollection') {
+                        for (const geometry of countries.geometries) {
+                            const countryPaths = geometryToSVGPaths(topology, geometry);
+                            paths.push(...countryPaths);
+                        }
+                    }
+
+                    return { success: true, paths };
+                } catch (error) {
+                    console.error('Failed to load world map:', error);
+                    return { success: false, paths: [] };
+                }
+            }
+
+            // Create curved path between two points
+            function createCurvedPath(from, to) {
+                const start = latLonToXY(from.lat, from.lon);
+                const end = latLonToXY(to.lat, to.lon);
+
+                // Handle paths that cross the map edge
+                let endX = end.x;
+                const directDist = Math.abs(end.x - start.x);
+                const wrapDist = 1000 - directDist;
+
+                if (wrapDist < directDist) {
+                    // Path crosses edge, wrap around
+                    if (end.x < start.x) {
+                        endX = end.x + 1000;
+                    } else {
+                        endX = end.x - 1000;
+                    }
+                }
+
+                const midX = (start.x + endX) / 2;
+                const midY = (start.y + end.y) / 2;
+                const dist = Math.sqrt(Math.pow(endX - start.x, 2) + Math.pow(end.y - start.y, 2));
+                const curvature = Math.min(dist * 0.15, 60);
+
+                // Curve upward (away from origin) for visual appeal
+                const controlY = midY - curvature;
+
+                return `M ${start.x} ${start.y} Q ${midX} ${controlY} ${endX} ${end.y}`;
+            }
+
+            // Initialize map
+            async function initMap(origin, destinations) {
+                const countriesGroup = document.getElementById('countries');
+                const routesGroup = document.getElementById('routes');
+                const airportsGroup = document.getElementById('airports');
+                const tooltip = document.getElementById('tooltip');
+                const loading = document.getElementById('loading');
+                const statusMessage = document.getElementById('status-message');
+
+                // Clear existing map
+                routesGroup.innerHTML = '';
+                airportsGroup.innerHTML = '';
+
+                // If origin is provided, center map on it (with some offset logic)
+                if (origin) {
+                    // Try to keep the Pacific handy or center on the airport
+                    // Standard Robinson usage is often 0, but for flight maps centered on the hub is good
+                    // Actually, let's just shift so the airport is somewhat central but 
+                    // we need to be careful about world wrapping. 
+                    // Simple heuristic: origin.lon
+                    CENTRAL_MERIDIAN = origin.lon;
+                }
+
+                // Load and draw world map from GeoJSON (only if paths empty or specific need)
+                // But we need to redraw countries if CENTRAL_MERIDIAN changed because projection depends on it
+                countriesGroup.innerHTML = ''; // Clear countries to redraw with new projection
+
+                const result = await loadWorldMap();
+
+                if (result.success && result.paths.length > 0) {
+                    result.paths.forEach(pathData => {
+                        const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                        pathEl.setAttribute('d', pathData);
+                        pathEl.setAttribute('class', 'land');
+                        countriesGroup.appendChild(pathEl);
+                    });
+                    // Hide loading indicator
+                    if (loading) loading.style.display = 'none';
                 } else {
-                    endX = end.x - 1000;
+                    // Show error state
+                    if (loading) {
+                        loading.innerHTML = '<span style="color: #ef4444;">⚠ Failed to load map data</span>';
+                    }
                 }
-            }
 
-            const midX = (start.x + endX) / 2;
-            const midY = (start.y + end.y) / 2;
-            const dist = Math.sqrt(Math.pow(endX - start.x, 2) + Math.pow(end.y - start.y, 2));
-            const curvature = Math.min(dist * 0.15, 60);
+                // Draw routes
+                destinations.forEach(flight => {
+                    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                    path.setAttribute('d', createCurvedPath(origin, flight));
+                    // Determine domestic/int based on checking country
+                    // Ideally our data has this, but if not we guess
+                    // Use flight.domestic property if available, otherwise check countries
+                    const isDomestic = flight.country === origin.country;
+                    flight.domestic = isDomestic;
 
-            // Curve upward (away from origin) for visual appeal
-            const controlY = midY - curvature;
+                    path.setAttribute('class', `route ${isDomestic ? 'domestic' : 'international'}`);
+                    path.setAttribute('data-city', flight.city);
+                    path.setAttribute('data-code', flight.code || '');
+                    path.setAttribute('data-country', flight.country || '');
+                    path.setAttribute('data-airlines', flight.airlines ? flight.airlines.join(', ') : 'Unknown');
+                    path.setAttribute('data-domestic', isDomestic);
 
-            return `M ${start.x} ${start.y} Q ${midX} ${controlY} ${endX} ${end.y}`;
-        }
+                    path.addEventListener('mouseenter', showTooltip);
+                    path.addEventListener('mousemove', moveTooltip);
+                    path.addEventListener('mouseleave', hideTooltip);
 
-        // Initialize map
-        async function initMap() {
-            const countriesGroup = document.getElementById('countries');
-            const routesGroup = document.getElementById('routes');
-            const airportsGroup = document.getElementById('airports');
-            const tooltip = document.getElementById('tooltip');
-            const loading = document.getElementById('loading');
-
-            // Load and draw world map from GeoJSON
-            const result = await loadWorldMap();
-
-            if (result.success && result.paths.length > 0) {
-                result.paths.forEach(pathData => {
-                    const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                    pathEl.setAttribute('d', pathData);
-                    pathEl.setAttribute('class', 'land');
-                    countriesGroup.appendChild(pathEl);
+                    routesGroup.appendChild(path);
                 });
-                // Hide loading indicator
-                if (loading) loading.style.display = 'none';
-            } else {
-                // Show error state
-                if (loading) {
-                    loading.innerHTML = '<span style="color: #ef4444;">⚠ Failed to load map data</span>';
-                }
+
+                // Draw Origin
+                const originPos = latLonToXY(origin.lat, origin.lon);
+                const originCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                originCircle.setAttribute('cx', originPos.x);
+                originCircle.setAttribute('cy', originPos.y);
+                originCircle.setAttribute('r', 6);
+                originCircle.setAttribute('data-base-radius', 6);
+                originCircle.setAttribute('class', 'airport origin');
+                originCircle.setAttribute('data-city', origin.name || origin.title);
+                originCircle.setAttribute('data-code', origin.code || '');
+                originCircle.addEventListener('mouseenter', (e) => {
+                    tooltip.innerHTML = `<h3>${origin.name || origin.title}</h3><div class="airlines">Origin</div>`;
+                    tooltip.classList.add('visible');
+                });
+                originCircle.addEventListener('mousemove', moveTooltip);
+                originCircle.addEventListener('mouseleave', hideTooltip);
+                airportsGroup.appendChild(originCircle);
+
+                // Draw destinations
+                destinations.forEach(flight => {
+                    const pos = latLonToXY(flight.lat, flight.lon);
+                    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    circle.setAttribute('cx', pos.x);
+                    circle.setAttribute('cy', pos.y);
+                    circle.setAttribute('r', 4);
+                    circle.setAttribute('data-base-radius', 4);
+                    circle.setAttribute('class', 'airport destination');
+                    circle.setAttribute('data-city', flight.city);
+                    circle.setAttribute('data-code', flight.code || '');
+                    circle.setAttribute('data-country', flight.country || '');
+                    const displayAirlines = flight.airlines ? flight.airlines.join(', ') : 'Unknown';
+                    circle.setAttribute('data-airlines', displayAirlines);
+                    const isDomestic = flight.country === origin.country;
+                    circle.setAttribute('data-domestic', isDomestic);
+
+                    circle.addEventListener('mouseenter', showTooltip);
+                    circle.addEventListener('mousemove', moveTooltip);
+                    circle.addEventListener('mouseleave', hideTooltip);
+
+                    airportsGroup.appendChild(circle);
+                });
+
+                // Update stats
+                const domesticCount = destinations.filter(f => f.domestic).length; // Will be 0 if domestic undefined
+                const internationalCount = destinations.filter(f => f.domestic === false).length;
+                const airlines = new Set(destinations.flatMap(f => f.airlines));
+
+                document.getElementById('domestic-count').textContent = destinations.some(d => d.domestic !== undefined) ? domesticCount : '-';
+                document.getElementById('international-count').textContent = destinations.some(d => d.domestic !== undefined) ? internationalCount : '-';
+                document.getElementById('airline-count').textContent = airlines.size;
+
+                // Update Legend and Footer
+                document.getElementById('legend-origin').textContent = origin.name || origin.title;
+                const sourceLink = document.getElementById('source-link');
+                sourceLink.href = `https://en.wikipedia.org/wiki/${origin.title}`;
+                sourceLink.textContent = `Wikipedia - ${origin.title}`;
             }
 
-            // Draw routes
-            flights.forEach(flight => {
-                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                path.setAttribute('d', createCurvedPath(AUCKLAND, flight));
-                path.setAttribute('class', `route ${flight.domestic ? 'domestic' : 'international'}`);
-                path.setAttribute('data-city', flight.city);
-                path.setAttribute('data-code', flight.code);
-                path.setAttribute('data-country', flight.country);
-                path.setAttribute('data-airlines', flight.airlines.join(', '));
-                path.setAttribute('data-domestic', flight.domestic);
+            function showTooltip(e) {
+                const target = e.target;
+                const city = target.getAttribute('data-city');
+                const code = target.getAttribute('data-code');
+                const country = target.getAttribute('data-country');
+                const airlines = target.getAttribute('data-airlines');
+                const isDomestic = target.getAttribute('data-domestic') === 'true';
 
-                path.addEventListener('mouseenter', showTooltip);
-                path.addEventListener('mousemove', moveTooltip);
-                path.addEventListener('mouseleave', hideTooltip);
-
-                routesGroup.appendChild(path);
-            });
-
-            // Draw Auckland (origin)
-            const aklPos = latLonToXY(AUCKLAND.lat, AUCKLAND.lon);
-            const aklCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            aklCircle.setAttribute('cx', aklPos.x);
-            aklCircle.setAttribute('cy', aklPos.y);
-            aklCircle.setAttribute('r', 6);
-            aklCircle.setAttribute('data-base-radius', 6);
-            aklCircle.setAttribute('class', 'airport origin');
-            aklCircle.setAttribute('data-city', AUCKLAND.name);
-            aklCircle.setAttribute('data-code', AUCKLAND.code);
-            aklCircle.addEventListener('mouseenter', (e) => {
-                tooltip.innerHTML = `<h3>Auckland International Airport</h3><div class="airlines">AKL • New Zealand</div>`;
-                tooltip.classList.add('visible');
-            });
-            aklCircle.addEventListener('mousemove', moveTooltip);
-            aklCircle.addEventListener('mouseleave', hideTooltip);
-            airportsGroup.appendChild(aklCircle);
-
-            // Draw destinations
-            flights.forEach(flight => {
-                const pos = latLonToXY(flight.lat, flight.lon);
-                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                circle.setAttribute('cx', pos.x);
-                circle.setAttribute('cy', pos.y);
-                circle.setAttribute('r', 4);
-                circle.setAttribute('data-base-radius', 4);
-                circle.setAttribute('class', 'airport destination');
-                circle.setAttribute('data-city', flight.city);
-                circle.setAttribute('data-code', flight.code);
-                circle.setAttribute('data-country', flight.country);
-                circle.setAttribute('data-airlines', flight.airlines.join(', '));
-                circle.setAttribute('data-domestic', flight.domestic);
-
-                circle.addEventListener('mouseenter', showTooltip);
-                circle.addEventListener('mousemove', moveTooltip);
-                circle.addEventListener('mouseleave', hideTooltip);
-
-                airportsGroup.appendChild(circle);
-            });
-
-            // Update stats
-            const domesticCount = flights.filter(f => f.domestic).length;
-            const internationalCount = flights.filter(f => !f.domestic).length;
-            const airlines = new Set(flights.flatMap(f => f.airlines));
-
-            document.getElementById('domestic-count').textContent = domesticCount;
-            document.getElementById('international-count').textContent = internationalCount;
-            document.getElementById('airline-count').textContent = airlines.size;
-        }
-
-        function showTooltip(e) {
-            const target = e.target;
-            const city = target.getAttribute('data-city');
-            const code = target.getAttribute('data-code');
-            const country = target.getAttribute('data-country');
-            const airlines = target.getAttribute('data-airlines');
-            const isDomestic = target.getAttribute('data-domestic') === 'true';
-
-            const tooltip = document.getElementById('tooltip');
-            tooltip.innerHTML = `
+                const tooltip = document.getElementById('tooltip');
+                tooltip.innerHTML = `
                 <span class="route-type ${isDomestic ? 'domestic' : 'international'}">${isDomestic ? 'Domestic' : 'International'}</span>
                 <h3>${city} (${code})</h3>
                 <div class="airlines"><strong>Airlines:</strong> ${airlines}</div>
             `;
-            tooltip.classList.add('visible');
-        }
-
-        function moveTooltip(e) {
-            const tooltip = document.getElementById('tooltip');
-            tooltip.style.left = (e.clientX + 15) + 'px';
-            tooltip.style.top = (e.clientY + 15) + 'px';
-        }
-
-        function hideTooltip() {
-            const tooltip = document.getElementById('tooltip');
-            tooltip.classList.remove('visible');
-        }
-
-        // ==================== ZOOM & PAN FUNCTIONALITY ====================
-
-        // Zoom/pan state
-        const viewState = {
-            x: 0,
-            y: 0,
-            width: 1000,
-            height: 500,
-            minZoom: 0.5,   // 50% zoom out max
-            maxZoom: 8,     // 800% zoom in max
-            zoomStep: 1.3   // 30% zoom per step
-        };
-
-        // Original viewBox dimensions
-        const ORIGINAL_WIDTH = 1000;
-        const ORIGINAL_HEIGHT = 500;
-
-        // Get current zoom level as percentage
-        function getZoomLevel() {
-            return Math.round((ORIGINAL_WIDTH / viewState.width) * 100);
-        }
-
-        // Update viewBox and zoom display
-        function updateViewBox() {
-            const map = document.getElementById('map');
-            const zoomInfo = document.getElementById('zoom-info');
-
-            map.setAttribute('viewBox', `${viewState.x} ${viewState.y} ${viewState.width} ${viewState.height}`);
-            zoomInfo.textContent = `${getZoomLevel()}%`;
-
-            // Update airport circle sizes to maintain consistent screen size
-            updateAirportSizes();
-        }
-
-        // Update airport circle radii based on zoom level
-        // Icons scale with the map but have a minimum size to remain visible
-        function updateAirportSizes() {
-            const zoomLevel = ORIGINAL_WIDTH / viewState.width; // 1 = 100%, 2 = 200%, etc.
-            const airports = document.querySelectorAll('.airport');
-
-            airports.forEach(airport => {
-                const baseRadius = parseFloat(airport.getAttribute('data-base-radius')) || 4;
-                // Scale down as zoom increases, but maintain minimum visible size
-                const minRadius = baseRadius * 0.3; // Minimum 30% of base size
-                const scaledRadius = baseRadius / Math.sqrt(zoomLevel); // Gentle scaling
-                airport.setAttribute('r', Math.max(minRadius, scaledRadius));
-            });
-        }
-
-        // Zoom to a specific point
-        function zoomAtPoint(factor, clientX, clientY) {
-            const map = document.getElementById('map');
-            const rect = map.getBoundingClientRect();
-
-            // Calculate the point in SVG coordinates
-            const svgX = viewState.x + (clientX - rect.left) / rect.width * viewState.width;
-            const svgY = viewState.y + (clientY - rect.top) / rect.height * viewState.height;
-
-            // Calculate new dimensions
-            const newWidth = viewState.width / factor;
-            const newHeight = viewState.height / factor;
-
-            // Check zoom limits
-            const newZoom = ORIGINAL_WIDTH / newWidth;
-            if (newZoom < viewState.minZoom || newZoom > viewState.maxZoom) {
-                return;
+                tooltip.classList.add('visible');
             }
 
-            // Adjust position to zoom toward the point
-            viewState.x = svgX - (svgX - viewState.x) / factor;
-            viewState.y = svgY - (svgY - viewState.y) / factor;
-            viewState.width = newWidth;
-            viewState.height = newHeight;
+            function moveTooltip(e) {
+                const tooltip = document.getElementById('tooltip');
+                tooltip.style.left = (e.clientX + 15) + 'px';
+                tooltip.style.top = (e.clientY + 15) + 'px';
+            }
 
-            // Constrain to bounds
-            constrainViewBox();
-            updateViewBox();
-        }
+            function hideTooltip() {
+                const tooltip = document.getElementById('tooltip');
+                tooltip.classList.remove('visible');
+            }
 
-        // Zoom centered on the map
-        function zoomCentered(factor) {
-            const map = document.getElementById('map');
-            const rect = map.getBoundingClientRect();
-            zoomAtPoint(factor, rect.left + rect.width / 2, rect.top + rect.height / 2);
-        }
+            // ==================== ZOOM & PAN FUNCTIONALITY ====================
 
-        // Constrain viewBox to reasonable bounds
-        function constrainViewBox() {
-            // Allow some panning beyond the original bounds
-            const padding = viewState.width * 0.1;
-            const minX = -padding;
-            const maxX = ORIGINAL_WIDTH - viewState.width + padding;
-            const minY = -padding;
-            const maxY = ORIGINAL_HEIGHT - viewState.height + padding;
+            // Zoom/pan state
+            const viewState = {
+                x: 0,
+                y: 0,
+                width: 1000,
+                height: 500,
+                minZoom: 0.5,   // 50% zoom out max
+                maxZoom: 8,     // 800% zoom in max
+                zoomStep: 1.3   // 30% zoom per step
+            };
 
-            viewState.x = Math.max(minX, Math.min(maxX, viewState.x));
-            viewState.y = Math.max(minY, Math.min(maxY, viewState.y));
-        }
+            // Original viewBox dimensions
+            const ORIGINAL_WIDTH = 1000;
+            const ORIGINAL_HEIGHT = 500;
 
-        // Reset to original view
-        function resetView() {
-            viewState.x = 0;
-            viewState.y = 0;
-            viewState.width = ORIGINAL_WIDTH;
-            viewState.height = ORIGINAL_HEIGHT;
-            updateViewBox();
-        }
+            // Get current zoom level as percentage
+            function getZoomLevel() {
+                return Math.round((ORIGINAL_WIDTH / viewState.width) * 100);
+            }
 
-        // Initialize zoom and pan controls
-        function initZoomPan() {
-            const map = document.getElementById('map');
-            const zoomIn = document.getElementById('zoom-in');
-            const zoomOut = document.getElementById('zoom-out');
-            const zoomReset = document.getElementById('zoom-reset');
+            // Update viewBox and zoom display
+            function updateViewBox() {
+                const map = document.getElementById('map');
+                const zoomInfo = document.getElementById('zoom-info');
 
-            // Button controls
-            zoomIn.addEventListener('click', () => zoomCentered(viewState.zoomStep));
-            zoomOut.addEventListener('click', () => zoomCentered(1 / viewState.zoomStep));
-            zoomReset.addEventListener('click', resetView);
+                map.setAttribute('viewBox', `${viewState.x} ${viewState.y} ${viewState.width} ${viewState.height}`);
+                zoomInfo.textContent = `${getZoomLevel()}%`;
 
-            // Mouse wheel zoom
-            map.addEventListener('wheel', (e) => {
-                e.preventDefault();
-                const factor = e.deltaY < 0 ? viewState.zoomStep : 1 / viewState.zoomStep;
-                zoomAtPoint(factor, e.clientX, e.clientY);
-            }, { passive: false });
+                // Update airport circle sizes to maintain consistent screen size
+                updateAirportSizes();
+            }
 
-            // Pan with mouse drag
-            let isPanning = false;
-            let startX, startY;
-            let startViewX, startViewY;
+            // Update airport circle radii based on zoom level
+            // Icons scale with the map but have a minimum size to remain visible
+            function updateAirportSizes() {
+                const zoomLevel = ORIGINAL_WIDTH / viewState.width; // 1 = 100%, 2 = 200%, etc.
+                const airports = document.querySelectorAll('.airport');
 
-            map.addEventListener('mousedown', (e) => {
-                // Only pan with left mouse button
-                if (e.button !== 0) return;
+                airports.forEach(airport => {
+                    const baseRadius = parseFloat(airport.getAttribute('data-base-radius')) || 4;
+                    // Scale down as zoom increases, but maintain minimum visible size
+                    const minRadius = baseRadius * 0.3; // Minimum 30% of base size
+                    const scaledRadius = baseRadius / Math.sqrt(zoomLevel); // Gentle scaling
+                    airport.setAttribute('r', Math.max(minRadius, scaledRadius));
+                });
+            }
 
-                isPanning = true;
-                startX = e.clientX;
-                startY = e.clientY;
-                startViewX = viewState.x;
-                startViewY = viewState.y;
-                map.classList.add('grabbing');
-                e.preventDefault();
-            });
-
-            document.addEventListener('mousemove', (e) => {
-                if (!isPanning) return;
-
+            // Zoom to a specific point
+            function zoomAtPoint(factor, clientX, clientY) {
                 const map = document.getElementById('map');
                 const rect = map.getBoundingClientRect();
 
-                // Calculate how much to pan in SVG coordinates
-                const dx = (e.clientX - startX) / rect.width * viewState.width;
-                const dy = (e.clientY - startY) / rect.height * viewState.height;
+                // Calculate the point in SVG coordinates
+                const svgX = viewState.x + (clientX - rect.left) / rect.width * viewState.width;
+                const svgY = viewState.y + (clientY - rect.top) / rect.height * viewState.height;
 
-                viewState.x = startViewX - dx;
-                viewState.y = startViewY - dy;
+                // Calculate new dimensions
+                const newWidth = viewState.width / factor;
+                const newHeight = viewState.height / factor;
 
+                // Check zoom limits
+                const newZoom = ORIGINAL_WIDTH / newWidth;
+                if (newZoom < viewState.minZoom || newZoom > viewState.maxZoom) {
+                    return;
+                }
+
+                // Adjust position to zoom toward the point
+                viewState.x = svgX - (svgX - viewState.x) / factor;
+                viewState.y = svgY - (svgY - viewState.y) / factor;
+                viewState.width = newWidth;
+                viewState.height = newHeight;
+
+                // Constrain to bounds
                 constrainViewBox();
                 updateViewBox();
-            });
+            }
 
-            document.addEventListener('mouseup', () => {
-                if (isPanning) {
-                    isPanning = false;
-                    const map = document.getElementById('map');
-                    map.classList.remove('grabbing');
-                }
-            });
+            // Zoom centered on the map
+            function zoomCentered(factor) {
+                const map = document.getElementById('map');
+                const rect = map.getBoundingClientRect();
+                zoomAtPoint(factor, rect.left + rect.width / 2, rect.top + rect.height / 2);
+            }
 
-            // Touch support for mobile
-            let lastTouchDist = 0;
-            let lastTouchCenter = { x: 0, y: 0 };
+            // Constrain viewBox to reasonable bounds
+            function constrainViewBox() {
+                // Allow some panning beyond the original bounds
+                const padding = viewState.width * 0.1;
+                const minX = -padding;
+                const maxX = ORIGINAL_WIDTH - viewState.width + padding;
+                const minY = -padding;
+                const maxY = ORIGINAL_HEIGHT - viewState.height + padding;
 
-            map.addEventListener('touchstart', (e) => {
-                if (e.touches.length === 1) {
-                    // Single touch - pan
+                viewState.x = Math.max(minX, Math.min(maxX, viewState.x));
+                viewState.y = Math.max(minY, Math.min(maxY, viewState.y));
+            }
+
+            // Reset to original view
+            function resetView() {
+                viewState.x = 0;
+                viewState.y = 0;
+                viewState.width = ORIGINAL_WIDTH;
+                viewState.height = ORIGINAL_HEIGHT;
+                updateViewBox();
+            }
+
+            // Initialize zoom and pan controls
+            function initZoomPan() {
+                const map = document.getElementById('map');
+                const zoomIn = document.getElementById('zoom-in');
+                const zoomOut = document.getElementById('zoom-out');
+                const zoomReset = document.getElementById('zoom-reset');
+
+                // Button controls
+                zoomIn.addEventListener('click', () => zoomCentered(viewState.zoomStep));
+                zoomOut.addEventListener('click', () => zoomCentered(1 / viewState.zoomStep));
+                zoomReset.addEventListener('click', resetView);
+
+                // Mouse wheel zoom
+                map.addEventListener('wheel', (e) => {
+                    e.preventDefault();
+                    const factor = e.deltaY < 0 ? viewState.zoomStep : 1 / viewState.zoomStep;
+                    zoomAtPoint(factor, e.clientX, e.clientY);
+                }, { passive: false });
+
+                // Pan with mouse drag
+                let isPanning = false;
+                let startX, startY;
+                let startViewX, startViewY;
+
+                map.addEventListener('mousedown', (e) => {
+                    // Only pan with left mouse button
+                    if (e.button !== 0) return;
+
                     isPanning = true;
-                    startX = e.touches[0].clientX;
-                    startY = e.touches[0].clientY;
+                    startX = e.clientX;
+                    startY = e.clientY;
                     startViewX = viewState.x;
                     startViewY = viewState.y;
                     map.classList.add('grabbing');
-                } else if (e.touches.length === 2) {
-                    // Two touches - pinch zoom
-                    isPanning = false;
-                    const dx = e.touches[0].clientX - e.touches[1].clientX;
-                    const dy = e.touches[0].clientY - e.touches[1].clientY;
-                    lastTouchDist = Math.sqrt(dx * dx + dy * dy);
-                    lastTouchCenter = {
-                        x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
-                        y: (e.touches[0].clientY + e.touches[1].clientY) / 2
-                    };
-                }
-                e.preventDefault();
-            }, { passive: false });
+                    e.preventDefault();
+                });
 
-            map.addEventListener('touchmove', (e) => {
-                if (e.touches.length === 1 && isPanning) {
-                    // Pan
+                document.addEventListener('mousemove', (e) => {
+                    if (!isPanning) return;
+
+                    const map = document.getElementById('map');
                     const rect = map.getBoundingClientRect();
-                    const dx = (e.touches[0].clientX - startX) / rect.width * viewState.width;
-                    const dy = (e.touches[0].clientY - startY) / rect.height * viewState.height;
+
+                    // Calculate how much to pan in SVG coordinates
+                    const dx = (e.clientX - startX) / rect.width * viewState.width;
+                    const dy = (e.clientY - startY) / rect.height * viewState.height;
 
                     viewState.x = startViewX - dx;
                     viewState.y = startViewY - dy;
 
                     constrainViewBox();
                     updateViewBox();
-                } else if (e.touches.length === 2) {
-                    // Pinch zoom
-                    const dx = e.touches[0].clientX - e.touches[1].clientX;
-                    const dy = e.touches[0].clientY - e.touches[1].clientY;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
+                });
 
-                    if (lastTouchDist > 0) {
-                        const factor = dist / lastTouchDist;
-                        const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-                        const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-                        zoomAtPoint(factor, centerX, centerY);
+                document.addEventListener('mouseup', () => {
+                    if (isPanning) {
+                        isPanning = false;
+                        const map = document.getElementById('map');
+                        map.classList.remove('grabbing');
+                    }
+                });
+
+                // Touch support for mobile
+                let lastTouchDist = 0;
+                let lastTouchCenter = { x: 0, y: 0 };
+
+                map.addEventListener('touchstart', (e) => {
+                    if (e.touches.length === 1) {
+                        // Single touch - pan
+                        isPanning = true;
+                        startX = e.touches[0].clientX;
+                        startY = e.touches[0].clientY;
+                        startViewX = viewState.x;
+                        startViewY = viewState.y;
+                        map.classList.add('grabbing');
+                    } else if (e.touches.length === 2) {
+                        // Two touches - pinch zoom
+                        isPanning = false;
+                        const dx = e.touches[0].clientX - e.touches[1].clientX;
+                        const dy = e.touches[0].clientY - e.touches[1].clientY;
+                        lastTouchDist = Math.sqrt(dx * dx + dy * dy);
+                        lastTouchCenter = {
+                            x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+                            y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+                        };
+                    }
+                    e.preventDefault();
+                }, { passive: false });
+
+                map.addEventListener('touchmove', (e) => {
+                    if (e.touches.length === 1 && isPanning) {
+                        // Pan
+                        const rect = map.getBoundingClientRect();
+                        const dx = (e.touches[0].clientX - startX) / rect.width * viewState.width;
+                        const dy = (e.touches[0].clientY - startY) / rect.height * viewState.height;
+
+                        viewState.x = startViewX - dx;
+                        viewState.y = startViewY - dy;
+
+                        constrainViewBox();
+                        updateViewBox();
+                    } else if (e.touches.length === 2) {
+                        // Pinch zoom
+                        const dx = e.touches[0].clientX - e.touches[1].clientX;
+                        const dy = e.touches[0].clientY - e.touches[1].clientY;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+
+                        if (lastTouchDist > 0) {
+                            const factor = dist / lastTouchDist;
+                            const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                            const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                            zoomAtPoint(factor, centerX, centerY);
+                        }
+
+                        lastTouchDist = dist;
+                    }
+                    e.preventDefault();
+                }, { passive: false });
+
+                map.addEventListener('touchend', () => {
+                    isPanning = false;
+                    lastTouchDist = 0;
+                    map.classList.remove('grabbing');
+                });
+
+                // Double click to zoom in
+                map.addEventListener('dblclick', (e) => {
+                    e.preventDefault();
+                    zoomAtPoint(viewState.zoomStep * 1.5, e.clientX, e.clientY);
+                });
+
+                // Keyboard shortcuts
+                document.addEventListener('keydown', (e) => {
+                    // Only handle if map container is in view
+                    if (e.key === '+' || e.key === '=') {
+                        zoomCentered(viewState.zoomStep);
+                    } else if (e.key === '-') {
+                        zoomCentered(1 / viewState.zoomStep);
+                    } else if (e.key === '0') {
+                        resetView();
+                    }
+                });
+            }
+
+            const searchInput = document.getElementById('airport-search');
+            const searchBtn = document.getElementById('search-btn');
+            const statusMessage = document.getElementById('status-message');
+            const loading = document.getElementById('loading');
+
+            // Handle search
+            async function handleSearch() {
+                const query = searchInput.value.trim();
+                if (!query) return;
+
+                console.group('Flight Search');
+                console.log(`[App] Starting search for: "${query}"`);
+
+                statusMessage.textContent = 'Searching...';
+                statusMessage.className = 'status-message';
+
+                // Clear previous map data slightly clearly
+                document.getElementById('routes').innerHTML = '';
+                document.getElementById('airports').innerHTML = '';
+
+                try {
+                    // 1. Search for airport
+                    const results = await wikiService.search(query);
+                    if (results.length === 0) {
+                        console.warn('[App] Search returned no results');
+                        statusMessage.textContent = 'No results found.';
+                        statusMessage.className = 'status-message error';
+                        console.groupEnd();
+                        return;
                     }
 
-                    lastTouchDist = dist;
+                    // Just pick the first result for now
+                    const bestMatch = results[0];
+                    console.log(`[App] Best match selected: "${bestMatch.title}"`);
+                    statusMessage.textContent = `Fetching data for ${bestMatch.title}...`;
+
+                    // 2. Fetch airport main data
+                    const airportData = await wikiService.getAirportData(bestMatch.title);
+                    if (!airportData || !airportData.coordinates) {
+                        console.error('[App] Failed to retrieve airport details or coordinates');
+                        statusMessage.textContent = 'Could not find airport location data.';
+                        statusMessage.className = 'status-message error';
+                        console.groupEnd();
+                        return;
+                    }
+
+                    const origin = {
+                        title: airportData.title,
+                        lat: airportData.coordinates.lat,
+                        lon: airportData.coordinates.lon,
+                        country: 'Unknown' // We'd need to parse the infobox for this, skipping for now or infer
+                    };
+
+                    statusMessage.textContent = `Parsing destinations...`;
+
+                    // 3. Parse destinations
+                    let destinations = wikiService.parseDestinations(airportData.html);
+                    console.log(`[App] Parsed ${destinations.length} raw destinations from HTML`);
+
+                    // Filter duplicate destinations
+                    const uniqueDestinations = new Map();
+                    destinations.forEach(desc => {
+                        if (!uniqueDestinations.has(desc.title)) {
+                            uniqueDestinations.set(desc.title, { ...desc, airlines: [desc.airline] });
+                        } else {
+                            // Merge airlines
+                            const existing = uniqueDestinations.get(desc.title);
+                            if (desc.airline && !existing.airlines.includes(desc.airline)) {
+                                existing.airlines.push(desc.airline);
+                            }
+                        }
+                    });
+
+                    destinations = Array.from(uniqueDestinations.values());
+                    console.log(`[App] Consolidated to ${destinations.length} unique destinations`);
+
+                    if (destinations.length === 0) {
+                        console.warn('[App] No destinations found in parsed data');
+                        statusMessage.textContent = `Found airport but no flight routes in standard format.`;
+                        statusMessage.className = 'status-message error';
+                        // Draw just the origin?
+                        initMap(origin, []);
+                        console.groupEnd();
+                        return;
+                    }
+
+                    statusMessage.textContent = `Locating ${destinations.length} destinations... (this may take a moment)`;
+
+                    // 4. Batch geocode destinations
+                    // This can take time for 100+ destinations
+                    const titles = destinations.map(d => d.title);
+                    const coordsMap = await wikiService.getCoordinates(titles);
+
+                    // Combine data
+                    const validRoutes = destinations.filter(d => coordsMap[d.title]).map(d => ({
+                        city: d.city,
+                        title: d.title,
+                        lat: coordsMap[d.title].lat,
+                        lon: coordsMap[d.title].lon,
+                        airlines: d.airlines,
+                        country: 'Unknown' // Wiki api doesn't give country easily in batch, would need more parsing
+                    }));
+
+                    console.log(`[App] Successfully mapped ${validRoutes.length} valid routes`);
+                    statusMessage.textContent = `Mapped ${validRoutes.length} routes from ${origin.title}`;
+
+                    // Render Map
+                    await initMap(origin, validRoutes);
+
+                    // Stats are updated inside initMap
+
+                    console.groupEnd();
+
+                } catch (e) {
+                    console.error('[App] Main Error Handler:', e);
+                    statusMessage.textContent = 'An error occurred.';
+                    statusMessage.className = 'status-message error';
+                    console.groupEnd();
                 }
-                e.preventDefault();
-            }, { passive: false });
+            }
 
-            map.addEventListener('touchend', () => {
-                isPanning = false;
-                lastTouchDist = 0;
-                map.classList.remove('grabbing');
+            searchBtn.addEventListener('click', handleSearch);
+            searchInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') handleSearch();
             });
 
-            // Double click to zoom in
-            map.addEventListener('dblclick', (e) => {
-                e.preventDefault();
-                zoomAtPoint(viewState.zoomStep * 1.5, e.clientX, e.clientY);
-            });
-
-            // Keyboard shortcuts
-            document.addEventListener('keydown', (e) => {
-                // Only handle if map container is in view
-                if (e.key === '+' || e.key === '=') {
-                    zoomCentered(viewState.zoomStep);
-                } else if (e.key === '-') {
-                    zoomCentered(1 / viewState.zoomStep);
-                } else if (e.key === '0') {
-                    resetView();
+            // Initial load - don't load map automatically until searched
+            // Or maybe load just the world map background?
+            // Initial load - don't load map automatically until searched
+            // Or maybe load just the world map background?
+            // Initial load - don't load map automatically until searched
+            // Or maybe load just the world map background?
+            loadWorldMap().then(result => {
+                console.log('[App] World map loaded:', result.success ? 'Success' : 'Failed');
+                if (result.success && result.paths.length > 0) {
+                    const countriesGroup = document.getElementById('countries');
+                    result.paths.forEach(pathData => {
+                        const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                        pathEl.setAttribute('d', pathData);
+                        pathEl.setAttribute('class', 'land');
+                        countriesGroup.appendChild(pathEl);
+                    });
+                    document.getElementById('loading').style.display = 'none';
                 }
+                initZoomPan();
             });
-        }
-
-        // Initialize on load
-        document.addEventListener('DOMContentLoaded', async () => {
-            await initMap();
-            initZoomPan();
-        });
-    </script>
+        </script>
 </body>
+
 </html>
