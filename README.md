@@ -13,4 +13,4 @@ This is a HTML page which shows a map of all passenger flights from any airport 
 
 When first opened the page should display an input field for the airport name or code. Once the airport name or code has been entered, the page should display a zoomable and scrollable world map with the flights overlaid on it. Mousing over a flight arc or a destination airport should show the name and IATA/ICAO codes of the destination airport and the airline or airlines that operate flights to that destination.
 
-Be very careful to ensure that the code to parse flights and destinations from the Wikipedia page is robust and displays all flights from all passenger airlines. Make sure this is working before starting work on the frontend display.
+Be very careful to ensure that the code to parse flights and destinations from the Wikipedia page is robust and returns all flights from all passenger airlines. Make sure this is working before starting work on the frontend display.
