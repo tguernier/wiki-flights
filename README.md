@@ -1,6 +1,8 @@
 # wiki-flights
 This is a HTML page which shows a map of flights from any airport with a list of destinations. It uses the Wikipedia page for the airport to get the list of destinations.
 
+This version of the site was summoned into being by Gemini 3 Pro using the Antigravity IDE.
+
 ## How to use
 
 1. Open the HTML page in a web browser.

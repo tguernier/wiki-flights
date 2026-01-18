@@ -109,6 +109,7 @@ const WikiService = {
      * Parse the "Airlines and destinations" table from the HTML.
      */
     parseDestinations(html) {
+        console.log("Starting parseDestinations...");
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
 
@@ -126,6 +127,7 @@ const WikiService = {
             console.error('Could not find "Airlines and destinations" section');
             return [];
         }
+        console.log("Found 'Airlines and destinations' header:", header.tagName);
 
         // Handle modern Wikipedia styling where headers are wrapped in .mw-heading
         let node = header;
@@ -144,6 +146,7 @@ const WikiService = {
         while (node) {
             if (node.tagName === 'TABLE' && node.classList.contains('wikitable')) {
                 table = node;
+                console.log("Found destinations table.");
                 break;
             }
 
@@ -157,16 +160,19 @@ const WikiService = {
             if (/^H[1-6]$/.test(currentNodeTagName)) {
                 const currentLevel = parseInt(currentNodeTagName.substring(1));
                 if (currentLevel <= startLevel) {
-                    // We hit a header of same or higher level (e.g. H2 or H1), so we are done with this section
+                    console.log(`Hit header ${currentNodeTagName} (level ${currentLevel}) <= start level ${startLevel}. Stopping search.`);
                     break;
                 }
-                // If currentLevel > startLevel (e.g. H3 vs H2), we continue as it is a subsection
+                console.log(`Skipping subsection header ${currentNodeTagName} (level ${currentLevel}) > start level ${startLevel}.`);
             }
 
             node = node.nextElementSibling;
         }
 
-        if (!table) return [];
+        if (!table) {
+            console.error("No table found after the header.");
+            return [];
+        }
 
         // Parse headers to find "Destinations" column index
         // Headers are usually in the first tr (or thead)
@@ -183,6 +189,8 @@ const WikiService = {
             });
         }
 
+        console.log(`Column Indices: Airline=${airlineColIndex}, Dest=${destColIndex}`);
+
         // Fallback if headers are weird or missing
         if (destColIndex === -1) destColIndex = 1; // Default to 2nd column
         if (airlineColIndex === -1) airlineColIndex = 0; // Default to 1st column
@@ -190,6 +198,7 @@ const WikiService = {
         // Parse rows
         const flights = [];
         const rows = Array.from(table.querySelectorAll('tr'));
+        console.log(`Processing ${rows.length} rows.`);
 
         let currentAirline = null;
         let airlineRowSpanLeft = 0;
@@ -201,42 +210,23 @@ const WikiService = {
             const cells = Array.from(row.querySelectorAll('td'));
 
             // If purely header row
-            if (row.querySelector('th') && cells.length === 0) continue;
-            if (cells.length === 0) continue;
+            if (row.querySelector('th') && cells.length === 0) {
+                console.log(`Row ${i}: Skipping header row.`);
+                continue;
+            }
+            if (cells.length === 0) {
+                console.log(`Row ${i}: Skipping empty row.`);
+                continue;
+            }
 
             // Logic to grab Airline and Destination based on index
-            // Note: If Airline is rowspanned, the indices shift for subsequent rows!
-            // E.g.
-            // Row 1: [Airline (rowspan=2)], [Terminal], [Destinations]  (3 cells)
-            // Row 2: [Terminal], [Destinations]                          (2 cells)
-            //
-            // If we know Airline is Col 0 and Dest is Col 2.
-            // In Row 2, the "real" Col 0 (Airline) is invisible. 
-            // The first cell in DOM is "Terminal" which effectively becomes Col 1.
-            // The second cell in DOM is "Destinations" which effectively becomes Col 2.
 
-            // We need to map DOM cells to Logical columns.
-
-            let domCellIndex = 0;
             let targetAirlineCell = null;
             let targetDestCell = null;
 
-            // Simplified State Machine for columns
-            // We only care about Airline (usually 0) and Dest (usually 1 or 2).
-            // This is getting complicated to fully simulate table model.
-            // Let's stick to the heuristic:
-            // If Airline is rowspanned:
-            //    We are looking for the 'Destinations' field in the remaining cells.
-            //    If original scheme was Airline(0), Dest(1) -> Now cell 0 is Dest.
-            //    If original scheme was Airline(0), Term(1), Dest(2) -> Now cell 1 is Dest.
-
-            // Calculate effective index for Destinations
-            // validDestIndex = destColIndex
-            // if (airlineRowSpanLeft > 0 && destColIndex > airlineColIndex) validDestIndex--;
-
-
             if (airlineRowSpanLeft > 0) {
                 // Airline is set from previous
+                console.log(`Row ${i}: using cached airline "${currentAirline}" (rowspan left: ${airlineRowSpanLeft})`);
 
                 // Adjust index because Airline cell is missing
                 let effectiveDestIndex = destColIndex;
@@ -254,7 +244,10 @@ const WikiService = {
             } else {
                 // New Airline
                 targetAirlineCell = cells[airlineColIndex];
-                if (!targetAirlineCell) continue; // Should not happen if well-formed
+                if (!targetAirlineCell) {
+                    console.log(`Row ${i}: No airline cell found at index ${airlineColIndex}. Skipping.`);
+                    continue;
+                }
 
                 // Check for rowspan
                 if (targetAirlineCell.hasAttribute('rowspan')) {
@@ -265,33 +258,49 @@ const WikiService = {
                 }
 
                 currentAirline = targetAirlineCell.textContent.trim().replace(/\[.*?\]/g, '');
+                console.log(`Row ${i}: Found new airline "${currentAirline}".`);
 
                 targetDestCell = cells[destColIndex];
                 // Handle case where Dest index might be out of bounds (e.g. malformed row)
-                if (!targetDestCell) targetDestCell = cells[cells.length - 1];
+                if (!targetDestCell) {
+                    console.log(`Row ${i}: No dest cell at index ${destColIndex}, using last cell.`);
+                    targetDestCell = cells[cells.length - 1];
+                }
             }
 
-            if (!targetDestCell || !currentAirline) continue;
+            if (!targetDestCell || !currentAirline) {
+                console.log(`Row ${i}: Missing destCell or currentAirline. Skipping.`);
+                continue;
+            }
 
             // Extract destinations
             const links = targetDestCell.querySelectorAll('a');
-            links.forEach(link => {
-                // Filter out citations and internal wiki meta links
-                if (link.href.includes('#cite_note')) return;
-                if (link.title.includes('Edit section')) return;
-                // Exclude invalid matches if any
-                if (link.closest('.reference')) return;
+            console.log(`Row ${i}: Found ${links.length} links in dest cell.`);
 
+            links.forEach(link => {
                 const destName = link.textContent.trim();
                 const destTitle = link.getAttribute('title');
 
-                if (destName && destTitle) {
-                    flights.push({
-                        airline: currentAirline,
-                        destination: destName,
-                        destinationTitle: destTitle
-                    });
+                // Filter out citations and internal wiki meta links
+                if (link.href.includes('#cite_note')) {
+                    console.log(`  - Ignoring citation link: ${destName}`);
+                    return;
                 }
+                if (link.title && link.title.includes('Edit section')) return;
+                // Exclude invalid matches if any
+                if (link.closest('.reference')) return;
+
+                if (!destName || !destTitle) {
+                    console.log(`  - Ignoring empty name/title link.`);
+                    return;
+                }
+
+                console.log(`  + Adding flight: ${currentAirline} -> ${destName}`);
+                flights.push({
+                    airline: currentAirline,
+                    destination: destName,
+                    destinationTitle: destTitle
+                });
             });
         }
 
@@ -300,24 +309,27 @@ const WikiService = {
 
     /**
      * Batch fetch coordinates for a list of Wikipedia page titles.
-     * Wikipedia API limits to 50 titles per query.
+     * Uses Wikidata Item ID (Q-code) to fetch coordinates if Wikipedia prop=coordinates misses.
      */
     async getCoordinates(titles) {
         const uniqueTitles = [...new Set(titles)];
         const batches = [];
         const BATCH_SIZE = 50;
-
         for (let i = 0; i < uniqueTitles.length; i += BATCH_SIZE) {
             batches.push(uniqueTitles.slice(i, i + BATCH_SIZE));
         }
 
         const results = {};
+        const missingButHaveQID = {}; // Map: QID -> [Original Titles]
 
+        // 1. Fetch from Wikipedia (Attempt 1 + Get QIDs)
         for (const batch of batches) {
             const params = new URLSearchParams({
                 action: 'query',
-                prop: 'coordinates',
+                prop: 'coordinates|pageprops',
+                ppprop: 'wikibase_item',
                 titles: batch.join('|'),
+                redirects: 1,
                 format: 'json',
                 origin: '*'
             });
@@ -326,18 +338,96 @@ const WikiService = {
                 const response = await fetch(`${WIKI_API_BASE}?${params}`);
                 const data = await response.json();
 
-                if (data.query && data.query.pages) {
-                    Object.values(data.query.pages).forEach(page => {
-                        if (page.coordinates) {
-                            results[page.title] = page.coordinates[0];
+                if (data.query) {
+                    const redirectMap = {};
+                    if (data.query.redirects) {
+                        data.query.redirects.forEach(r => {
+                            if (!redirectMap[r.to]) redirectMap[r.to] = [];
+                            redirectMap[r.to].push(r.from);
+                        });
+                    }
+
+                    if (data.query.pages) {
+                        Object.values(data.query.pages).forEach(page => {
+                            const titlesToUpdate = [page.title];
+                            if (redirectMap[page.title]) {
+                                titlesToUpdate.push(...redirectMap[page.title]);
+                            }
+
+                            if (page.coordinates) {
+                                // Found directly in Wikipedia
+                                titlesToUpdate.forEach(t => results[t] = page.coordinates[0]);
+                            } else if (page.pageprops && page.pageprops.wikibase_item) {
+                                // Missing coords, but has Wikidata Item ID
+                                const qid = page.pageprops.wikibase_item;
+                                if (!missingButHaveQID[qid]) missingButHaveQID[qid] = [];
+                                missingButHaveQID[qid].push(...titlesToUpdate);
+                            }
+                        });
+                    }
+                }
+            } catch (e) {
+                console.error('Error fetching batch logic', e);
+            }
+        }
+
+        // 2. Fetch missing coordinates from Wikidata
+        const qidsToFetch = Object.keys(missingButHaveQID);
+        if (qidsToFetch.length > 0) {
+            console.log(`Fetching ${qidsToFetch.length} missing coordinates from Wikidata...`);
+            const wikidataCoords = await this.fetchWikidataCoordinates(qidsToFetch);
+
+            Object.keys(wikidataCoords).forEach(qid => {
+                if (missingButHaveQID[qid]) {
+                    missingButHaveQID[qid].forEach(title => {
+                        if (!results[title]) {
+                            results[title] = wikidataCoords[qid];
+                            console.log(`+ Resolved via Wikidata: ${title} -> ${wikidataCoords[qid].lat}, ${wikidataCoords[qid].lon}`);
+                        }
+                    });
+                }
+            });
+        }
+
+        return results;
+    },
+
+    async fetchWikidataCoordinates(qids) {
+        const results = {};
+        const batches = [];
+        for (let i = 0; i < qids.length; i += 50) {
+            batches.push(qids.slice(i, i + 50));
+        }
+
+        for (const batch of batches) {
+            const params = new URLSearchParams({
+                action: 'wbgetentities',
+                ids: batch.join('|'),
+                props: 'claims',
+                format: 'json',
+                origin: '*'
+            });
+
+            try {
+                const response = await fetch(`https://www.wikidata.org/w/api.php?${params}`);
+                const data = await response.json();
+
+                if (data.entities) {
+                    Object.values(data.entities).forEach(entity => {
+                        // P625 is "coordinate location"
+                        if (entity.claims && entity.claims.P625 && entity.claims.P625.length > 0) {
+                            const val = entity.claims.P625[0].mainsnak.datavalue.value;
+                            results[entity.id] = {
+                                lat: val.latitude,
+                                lon: val.longitude
+                            };
                         }
                     });
                 }
             } catch (e) {
-                console.error('Error fetching batch coordinates', e);
+                console.error('Error fetching Wikidata', e);
             }
         }
-
         return results;
     }
 };
@@ -389,12 +479,21 @@ const MapService = {
 
     addFlightPath(originLat, originLon, destLat, destLon, airline, destName) {
         // Create a polyline
-        // For simple visualization, straight line on Mercator is fine.
-        // For "arc" feel, we could use geodesic plugins but let's stick to simple first
-        // as per instructions to be "self-contained" and not use external libraries 
-        // (leaflet is allowed as CDN, but plugins might be extra).
+        // Handle Date Line crossing
+        // If difference in lon is > 180, we need to wrap around.
+        // Leaflet will draw the line the "short" way if coordinates are continuous.
+        // e.g. 170 to -170 (diff 340). We want 170 to 190.
 
-        const line = L.polyline([[originLat, originLon], [destLat, destLon]], {
+        let adjustedDestLon = destLon;
+        const diff = destLon - originLon;
+
+        if (diff > 180) {
+            adjustedDestLon -= 360;
+        } else if (diff < -180) {
+            adjustedDestLon += 360;
+        }
+
+        const line = L.polyline([[originLat, originLon], [destLat, adjustedDestLon]], {
             color: '#007bff',
             weight: 2,
             opacity: 0.6
@@ -471,21 +570,40 @@ async function handleSearch() {
         const destTitles = flights.map(f => f.destinationTitle).filter(t => t);
         const coordsMap = await WikiService.getCoordinates(destTitles);
 
-        // 5. Plot Flights
-        let plottedCount = 0;
+        // 5. Plot Flights (Grouped by Destination)
+        const flightsByDest = {};
+
         flights.forEach(flight => {
-            const destCoord = coordsMap[flight.destinationTitle];
+            const key = flight.destinationTitle; // Use title as unique key
+            if (!flightsByDest[key]) {
+                flightsByDest[key] = {
+                    destinationTitle: flight.destinationTitle,
+                    destination: flight.destination,
+                    airlines: new Set()
+                };
+            }
+            flightsByDest[key].airlines.add(flight.airline);
+        });
+
+        let plottedCount = 0;
+
+        Object.values(flightsByDest).forEach(group => {
+            const destCoord = coordsMap[group.destinationTitle];
+
             if (destCoord) {
+                // Combine airlines: "Air NZ, Jetstar"
+                const combinedAirlines = Array.from(group.airlines).join(', ');
+
                 MapService.addFlightPath(
                     originLat, originLon,
                     destCoord.lat, destCoord.lon,
-                    flight.airline,
-                    flight.destination
+                    combinedAirlines,
+                    group.destination
                 );
-                // Optional: Add marker for destination? Maybe too crowded.
-                // Let's add markers for destinations but without popups open by default
-                // MapService.addMarker(destCoord.lat, destCoord.lon, flight.destination);
+
                 plottedCount++;
+            } else {
+                console.warn(`Missing coordinates for destination: "${group.destination}" (Title: "${group.destinationTitle}")`);
             }
         });
 
